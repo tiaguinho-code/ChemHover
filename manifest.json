@@ -1,0 +1,9 @@
+{
+  "id": "chemhover",
+  "name": "ChemHover",
+  "version": "0.1.0",
+  "minAppVersion": "1.5.0",
+  "description": "Hover over marked chemical names to see their structures and properties.",
+  "author": "ChemHover",
+  "isDesktopOnly": false
+}

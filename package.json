@@ -1,0 +1,29 @@
+{
+  "name": "chemhover",
+  "version": "0.1.0",
+  "description": "Chemical name hover previews for Obsidian",
+  "main": "main.js",
+  "scripts": {
+    "build": "node esbuild.config.mjs",
+    "dev": "node esbuild.config.mjs --watch",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "obsidian",
+    "chemical",
+    "chemistry"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "@codemirror/language": "^6.10.8",
+    "@codemirror/state": "^6.4.1",
+    "@codemirror/view": "^6.36.2",
+    "@types/node": "^22.10.2",
+    "esbuild": "^0.28.2",
+    "obsidian": "^1.7.2",
+    "typescript": "^5.7.2"
+  },
+  "dependencies": {
+    "@rdkit/rdkit": "^2026.9.2"
+  }
+}
