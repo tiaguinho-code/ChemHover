@@ -1,3 +1,5 @@
+import { requestUrl, RequestUrlResponse } from "obsidian";
+
 interface WikipediaPage {
   pageid?: number;
   title?: string;
@@ -58,6 +60,26 @@ function apiUrl(parameters: Record<string, string>): string {
     ...parameters,
   });
   return `${API_ROOT}?${query.toString()}`;
+}
+
+function request(url: string, service: string): Promise<RequestUrlResponse> {
+  let timeoutId: number | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timeoutId = window.setTimeout(
+      () => reject(new Error(`${service} request timed out after ${REQUEST_TIMEOUT_MS} ms.`)),
+      REQUEST_TIMEOUT_MS,
+    );
+  });
+  return Promise.race([
+    requestUrl({
+      url,
+      throw: false,
+      headers: { Accept: "application/json" },
+    }),
+    timeout,
+  ]).finally(() => {
+    if (timeoutId !== undefined) window.clearTimeout(timeoutId);
+  });
 }
 
 function normalizeText(value: string): string {
@@ -165,7 +187,7 @@ export class WikipediaStructureResolver {
   }
 
   private async fetchStructureImages(searchName: string): Promise<WikipediaStructureImage[]> {
-    const pageResponse = await fetch(
+    const pageResponse = await request(
       apiUrl({
         titles: searchName,
         redirects: "1",
@@ -173,19 +195,14 @@ export class WikipediaStructureResolver {
         inprop: "url",
         imlimit: "max",
       }),
-      {
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-        headers: { Accept: "application/json" },
-      },
+      "Wikipedia",
     );
     if (pageResponse.status === 404) return [];
-    if (!pageResponse.ok) {
-      throw new Error(
-        `Wikipedia request failed (${pageResponse.status} ${pageResponse.statusText}).`,
-      );
+    if (pageResponse.status < 200 || pageResponse.status >= 300) {
+      throw new Error(`Wikipedia request failed (${pageResponse.status}).`);
     }
 
-    const pageData = (await pageResponse.json()) as WikipediaPageResponse;
+    const pageData = pageResponse.json as WikipediaPageResponse;
     const page = Object.values(pageData.query?.pages ?? {}).find(
       (candidate) => typeof candidate.pageid === "number" && candidate.pageid > 0,
     );
@@ -196,26 +213,21 @@ export class WikipediaStructureResolver {
       .slice(0, MAX_FILES_TO_INSPECT);
     if (!candidates.length) return [];
 
-    const imageResponse = await fetch(
+    const imageResponse = await request(
       apiUrl({
         titles: candidates.map(({ title }) => title).join("|"),
         prop: "imageinfo",
         iiprop: "url|extmetadata",
         iiurlwidth: "500",
       }),
-      {
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-        headers: { Accept: "application/json" },
-      },
+      "Wikimedia",
     );
     if (imageResponse.status === 404) return [];
-    if (!imageResponse.ok) {
-      throw new Error(
-        `Wikimedia image request failed (${imageResponse.status} ${imageResponse.statusText}).`,
-      );
+    if (imageResponse.status < 200 || imageResponse.status >= 300) {
+      throw new Error(`Wikimedia image request failed (${imageResponse.status}).`);
     }
 
-    const imageData = (await imageResponse.json()) as WikipediaImageResponse;
+    const imageData = imageResponse.json as WikipediaImageResponse;
     return Object.values(imageData.query?.pages ?? {})
       .flatMap((file) =>
         (file.imageinfo ?? []).map((imageInfo) => ({

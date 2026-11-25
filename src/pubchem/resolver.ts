@@ -1,4 +1,4 @@
-import { App, SuggestModal } from "obsidian";
+import { App, requestUrl, SuggestModal } from "obsidian";
 import { ChemicalCache, ChemicalRecord } from "../database/cache";
 
 interface PubChemCidResponse {
@@ -73,14 +73,27 @@ function chooseCandidate(
 }
 
 async function requestJson<T>(url: string): Promise<T> {
-  const response = await fetch(url, {
-    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-    headers: { Accept: "application/json" },
+  let timeoutId: number | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timeoutId = window.setTimeout(
+      () => reject(new Error(`PubChem request timed out after ${REQUEST_TIMEOUT_MS} ms.`)),
+      REQUEST_TIMEOUT_MS,
+    );
   });
-  if (!response.ok) {
-    throw new Error(`PubChem request failed (${response.status} ${response.statusText}).`);
+  const response = await Promise.race([
+    requestUrl({
+      url,
+      throw: false,
+      headers: { Accept: "application/json" },
+    }),
+    timeout,
+  ]).finally(() => {
+    if (timeoutId !== undefined) window.clearTimeout(timeoutId);
+  });
+  if (response.status < 200 || response.status >= 300) {
+    throw new Error(`PubChem request failed (${response.status}).`);
   }
-  return (await response.json()) as T;
+  return response.json as T;
 }
 
 function propertiesUrl(cids: number[], fields: string): string {

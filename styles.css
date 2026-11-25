@@ -1,6 +1,5 @@
 .chemhover-token {
-  text-decoration: underline dotted var(--text-accent);
-  text-underline-offset: 0.18em;
+  border-bottom: 1px dotted var(--text-accent);
   cursor: help;
 }
 

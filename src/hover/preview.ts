@@ -1,3 +1,4 @@
+import { sanitizeHTMLToDom } from "obsidian";
 import { ChemicalRecord } from "../database/cache";
 import { ChemicalResolver } from "../pubchem/resolver";
 import { RDKitRenderer } from "../renderer/rdkit-renderer";
@@ -73,13 +74,13 @@ export class ChemicalPreview {
   show(target: HTMLElement, name: string): void {
     window.clearTimeout(this.hideTimer);
     this.removeTooltip();
-    const tooltip = document.createElement("div");
-    tooltip.className = "chemhover-tooltip";
-    tooltip.setAttribute("role", "tooltip");
+    const tooltip = document.body.createDiv({
+      cls: "chemhover-tooltip",
+      attr: { role: "tooltip" },
+    });
     tooltip.addEventListener("pointerenter", () => window.clearTimeout(this.hideTimer));
     tooltip.addEventListener("pointerleave", () => this.scheduleHide());
     tooltip.textContent = "Looking up chemical…";
-    document.body.appendChild(tooltip);
     this.tooltip = tooltip;
     this.hoverTarget = target;
     document.addEventListener("keydown", this.handleKeydown, true);
@@ -165,7 +166,7 @@ export class ChemicalPreview {
         { once: true },
       );
     } else {
-      structure.innerHTML = artwork.svg;
+      structure.append(sanitizeHTMLToDom(artwork.svg));
       this.imageNavigation = undefined;
     }
 

@@ -62,3 +62,7 @@ PubChem lookups require an internet connection the first time a name is seen.
 Wikipedia images require an internet connection. If no suitable image is found
 or the image cannot be loaded, the molecule SVG is generated on-device from
 cached SMILES; no structure image is downloaded from PubChem.
+
+ChemHover is licensed under GPL-3.0-only. The bundled RDKit MinimalLib
+WebAssembly module remains under its BSD 3-Clause License; see
+`LICENSES/RDKit.txt`.

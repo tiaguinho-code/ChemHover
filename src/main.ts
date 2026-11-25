@@ -105,10 +105,11 @@ export default class ChemHoverPlugin extends Plugin {
       let cursor = 0;
       for (const expression of expressions) {
         fragment.append(source.slice(cursor, expression.start));
-        const token = document.createElement("span");
-        token.className = "chemhover-token";
-        token.dataset.chemhover = expression.name;
-        token.textContent = expression.name;
+        const token = createSpan({
+          cls: "chemhover-token",
+          text: expression.name,
+          attr: { "data-chemhover": expression.name },
+        });
         token.addEventListener("pointerenter", () => this.preview.show(token, expression.name));
         token.addEventListener("pointerleave", () => this.preview.scheduleHide());
         fragment.append(token);
