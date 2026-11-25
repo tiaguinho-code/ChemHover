@@ -1,6 +1,14 @@
 import { ChemicalRecord } from "../database/cache";
 import { ChemicalResolver } from "../pubchem/resolver";
 import { RDKitRenderer } from "../renderer/rdkit-renderer";
+import {
+  WikipediaStructureImage,
+  WikipediaStructureResolver,
+} from "../wikipedia/structure-resolver";
+
+type ChemicalArtwork =
+  | { source: "wikipedia"; image: WikipediaStructureImage }
+  | { source: "rdkit"; svg: string };
 
 export class ChemicalPreview {
   private tooltip?: HTMLElement;
@@ -9,6 +17,7 @@ export class ChemicalPreview {
   constructor(
     private readonly resolver: ChemicalResolver,
     private readonly renderer: RDKitRenderer,
+    private readonly wikipedia = new WikipediaStructureResolver(),
   ) {}
 
   show(target: HTMLElement, name: string): void {
@@ -32,29 +41,72 @@ export class ChemicalPreview {
   }
 
   private async loadPreview(tooltip: HTMLElement, name: string): Promise<void> {
+    let record: ChemicalRecord | null;
     try {
-      const record = await this.resolver.resolve(name);
-      if (!record) {
-        this.showMessage(tooltip, "No chemical selected or no PubChem match was found.");
-        return;
-      }
-      const svg = await this.renderer.render(record.smiles);
-      if (!tooltip.isConnected) return;
-      this.showRecord(tooltip, record, svg);
+      record = await this.resolver.resolve(name);
     } catch (error) {
-      console.error("ChemHover could not load a chemical preview.", error);
+      console.error("ChemHover could not resolve the chemical preview.", error);
       this.showMessage(
         tooltip,
         error instanceof Error ? error.message : "The chemical preview could not be loaded.",
       );
+      return;
     }
+    if (!record) {
+      this.showMessage(tooltip, "No chemical selected or no PubChem match was found.");
+      return;
+    }
+
+    let image: WikipediaStructureImage | null = null;
+    try {
+      image = await this.wikipedia.resolve(name);
+    } catch (error) {
+      console.warn("ChemHover could not look up a Wikipedia structure image; using RDKit.", error);
+    }
+    if (!tooltip.isConnected) return;
+
+    if (image) {
+      this.showRecord(tooltip, record, { source: "wikipedia", image });
+      return;
+    }
+    await this.showRdkitFallback(tooltip, record);
   }
 
-  private showRecord(tooltip: HTMLElement, record: ChemicalRecord, svg: string): void {
+  private showRecord(
+    tooltip: HTMLElement,
+    record: ChemicalRecord,
+    artwork: ChemicalArtwork,
+  ): void {
     tooltip.replaceChildren();
     tooltip.createEl("div", { cls: "chemhover-title", text: record.name });
     const structure = tooltip.createDiv({ cls: "chemhover-structure" });
-    structure.innerHTML = svg;
+    if (artwork.source === "wikipedia") {
+      const image = structure.createEl("img", {
+        attr: {
+          src: artwork.image.imageUrl,
+          alt: `${record.name} chemical structure`,
+        },
+      });
+      image.addEventListener(
+        "error",
+        () => {
+          console.warn("ChemHover could not load the Wikipedia image; using RDKit.");
+          void this.showRdkitFallback(tooltip, record);
+        },
+        { once: true },
+      );
+      structure.createEl("a", {
+        cls: "chemhover-image-source",
+        text: "Image source & license",
+        attr: {
+          href: artwork.image.pageUrl,
+          target: "_blank",
+          rel: "noopener noreferrer",
+        },
+      });
+    } else {
+      structure.innerHTML = artwork.svg;
+    }
     const details = tooltip.createDiv({ cls: "chemhover-details" });
     this.addDetail(details, "Formula", record.formula || "Not available");
     this.addDetail(
@@ -66,6 +118,26 @@ export class ChemicalPreview {
       this.addDetail(details, "Synonyms", record.synonyms.slice(0, 5).join(", "));
     }
     this.addDetail(details, "PubChem CID", String(record.cid));
+  }
+
+  private async showRdkitFallback(
+    tooltip: HTMLElement,
+    record: ChemicalRecord,
+  ): Promise<void> {
+    try {
+      const svg = await this.renderer.render(record.smiles);
+      if (tooltip.isConnected) {
+        this.showRecord(tooltip, record, { source: "rdkit", svg });
+      }
+    } catch (error) {
+      console.error("ChemHover could not render the RDKit fallback.", error);
+      this.showMessage(
+        tooltip,
+        error instanceof Error
+          ? error.message
+          : "The chemical structure image and RDKit fallback could not be loaded.",
+      );
+    }
   }
 
   private addDetail(container: HTMLElement, label: string, value: string): void {

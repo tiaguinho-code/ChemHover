@@ -1,8 +1,9 @@
 # ChemHover
 
 ChemHover is an Obsidian community plugin that looks up marked chemical names in
-PubChem and displays a locally rendered 2D structure and chemical properties on
-hover. Cached compounds remain available offline.
+PubChem and displays a chemical structure and properties on hover. It prefers a
+Wikipedia structure image when available and falls back to a local RDKit
+rendering. Cached compounds remain available offline.
 
 ## Use
 
@@ -49,11 +50,13 @@ lookups are cached for 24 hours; transient request failures are not.
 
 - `src/parser/` recognizes the explicit `\ch` syntax.
 - `src/pubchem/` resolves names and asks the user to disambiguate PubChem matches.
+- `src/wikipedia/` looks up Wikipedia structure images and their source pages.
 - `src/database/` persists chemical records, aliases, and temporary failed lookups
   using Obsidian plugin data storage.
-- `src/renderer/` uses RDKit MinimalLib to generate and cache SVG structures.
+- `src/renderer/` uses RDKit MinimalLib to generate and cache fallback SVG structures.
 - `src/hover/` displays the local structure and compound details.
 
 PubChem lookups require an internet connection the first time a name is seen.
-The molecule SVG is generated on-device from cached SMILES; no PubChem structure
-image is downloaded.
+Wikipedia images require an internet connection. If no suitable image is found
+or the image cannot be loaded, the molecule SVG is generated on-device from
+cached SMILES; no structure image is downloaded from PubChem.
