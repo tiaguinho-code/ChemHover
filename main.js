@@ -2144,7 +2144,13 @@ function findChemicalExpressions(text) {
 }
 
 // src/database/cache.ts
-var NEGATIVE_CACHE_TTL = 1440 * 60 * 1e3, ChemicalCache = class {
+var NEGATIVE_CACHE_TTL = 1440 * 60 * 1e3;
+function isChemicalArtworkPreference(value) {
+  if (!value || typeof value != "object") return !1;
+  let preference = value;
+  return preference.source === "wikipedia" ? typeof preference.fileTitle == "string" && preference.fileTitle.length > 0 : preference.source === "rdkit" && (preference.fileTitle === void 0 || typeof preference.fileTitle == "string" && preference.fileTitle.length > 0);
+}
+var ChemicalCache = class {
   constructor(persist) {
     this.persist = persist;
     this.chemicals = /* @__PURE__ */ new Map();
@@ -2156,10 +2162,15 @@ var NEGATIVE_CACHE_TTL = 1440 * 60 * 1e3, ChemicalCache = class {
     let saved = data;
     if (saved.version !== 1) return;
     for (let [key, record] of Object.entries(saved.chemicals ?? {}))
-      record && Number.isInteger(record.cid) && typeof record.name == "string" && typeof record.smiles == "string" && typeof record.formula == "string" && Number.isFinite(record.molecularWeight) ? this.chemicals.set(record.cid, {
-        ...record,
-        synonyms: Array.isArray(record.synonyms) ? record.synonyms.filter((value) => typeof value == "string") : []
-      }) : console.warn(`ChemHover ignored invalid cached chemical record "${key}".`);
+      if (record && Number.isInteger(record.cid) && typeof record.name == "string" && typeof record.smiles == "string" && typeof record.formula == "string" && Number.isFinite(record.molecularWeight)) {
+        let artworkPreference = record.artworkPreference;
+        artworkPreference !== void 0 && !isChemicalArtworkPreference(artworkPreference) && console.warn(`ChemHover ignored invalid artwork preference for cached chemical "${key}".`), this.chemicals.set(record.cid, {
+          ...record,
+          synonyms: Array.isArray(record.synonyms) ? record.synonyms.filter((value) => typeof value == "string") : [],
+          artworkPreference: isChemicalArtworkPreference(artworkPreference) ? artworkPreference : void 0
+        });
+      } else
+        console.warn(`ChemHover ignored invalid cached chemical record "${key}".`);
     for (let [alias, cid] of Object.entries(saved.aliases ?? {}))
       Number.isInteger(cid) && this.chemicals.has(cid) && this.aliases.set(normalizeChemicalName(alias), cid);
     let now = Date.now();
@@ -2178,7 +2189,10 @@ var NEGATIVE_CACHE_TTL = 1440 * 60 * 1e3, ChemicalCache = class {
     this.failed.set(normalizeChemicalName(name), Date.now() + NEGATIVE_CACHE_TTL), await this.save();
   }
   async remember(name, record) {
-    this.chemicals.set(record.cid, record);
+    this.chemicals.set(record.cid, {
+      ...record,
+      artworkPreference: record.artworkPreference ?? this.chemicals.get(record.cid)?.artworkPreference
+    });
     let requestedAlias = normalizeChemicalName(name);
     this.aliases.set(requestedAlias, record.cid), this.aliases.set(normalizeChemicalName(record.name), record.cid);
     for (let synonym of record.synonyms)
@@ -2191,10 +2205,18 @@ var NEGATIVE_CACHE_TTL = 1440 * 60 * 1e3, ChemicalCache = class {
     return [...this.chemicals.values()];
   }
   async replace(record) {
-    this.chemicals.set(record.cid, record), this.aliases.set(normalizeChemicalName(record.name), record.cid);
+    this.chemicals.set(record.cid, {
+      ...record,
+      artworkPreference: record.artworkPreference ?? this.chemicals.get(record.cid)?.artworkPreference
+    }), this.aliases.set(normalizeChemicalName(record.name), record.cid);
     for (let synonym of record.synonyms)
       this.aliases.set(normalizeChemicalName(synonym), record.cid);
     await this.save();
+  }
+  async setArtworkPreference(cid, preference) {
+    let record = this.chemicals.get(cid);
+    if (!record) throw new Error(`Cannot save artwork preference for uncached chemical CID ${cid}.`);
+    this.chemicals.set(cid, { ...record, artworkPreference: preference }), await this.save();
   }
   async clear() {
     this.chemicals.clear(), this.aliases.clear(), this.failed.clear(), await this.save();
@@ -2419,8 +2441,17 @@ var ChemicalPreview = class {
       console.warn("ChemHover could not look up a Wikipedia structure image; using RDKit.", error);
     }
     if (tooltip.isConnected) {
+      if (record.artworkPreference?.source === "rdkit") {
+        await this.showRdkitFallback(tooltip, record, images);
+        return;
+      }
       if (images.length) {
-        this.showRecord(tooltip, record, { source: "wikipedia", images, index: 0 });
+        let selectedTitle = record.artworkPreference?.fileTitle, selectedIndex = selectedTitle ? images.findIndex((image) => image.fileTitle === selectedTitle) : -1;
+        this.showRecord(tooltip, record, {
+          source: "wikipedia",
+          images,
+          index: selectedIndex >= 0 ? selectedIndex : 0
+        });
         return;
       }
       await this.showRdkitFallback(tooltip, record);
@@ -2467,7 +2498,7 @@ var ChemicalPreview = class {
       details,
       "Molecular weight",
       record.molecularWeight ? `${record.molecularWeight.toFixed(2)} g/mol` : "Not available"
-    ), record.synonyms.length && this.addDetail(details, "Synonyms", record.synonyms.slice(0, 5).join(", ")), this.addDetail(details, "PubChem CID", String(record.cid)), artwork.source === "wikipedia" && this.addWikipediaControls(detailsContent, tooltip, record, artwork);
+    ), record.synonyms.length && this.addDetail(details, "Synonyms", record.synonyms.slice(0, 5).join(", ")), this.addDetail(details, "PubChem CID", String(record.cid)), artwork.source === "wikipedia" ? this.addWikipediaControls(detailsContent, tooltip, record, artwork) : artwork.images?.length && this.addWikipediaRestoreControl(detailsContent, tooltip, record, artwork.images);
   }
   addWikipediaControls(container, tooltip, record, artwork) {
     let currentImage = artwork.images[artwork.index], controls = container.createDiv({ cls: "chemhover-image-controls" });
@@ -2487,7 +2518,13 @@ var ChemicalPreview = class {
     });
     previous.disabled = artwork.images.length < 2, previous.addEventListener("click", () => {
       let index = (artwork.index - 1 + artwork.images.length) % artwork.images.length;
-      this.showRecord(tooltip, record, { ...artwork, index }, this.areDetailsExpanded(tooltip));
+      this.selectWikipediaImage(
+        tooltip,
+        record,
+        artwork.images,
+        index,
+        this.areDetailsExpanded(tooltip)
+      );
     }), navigation.createSpan({
       cls: "chemhover-image-count",
       text: `${artwork.index + 1} / ${artwork.images.length}`
@@ -2498,39 +2535,84 @@ var ChemicalPreview = class {
     });
     next.disabled = artwork.images.length < 2, next.addEventListener("click", () => {
       let index = (artwork.index + 1) % artwork.images.length;
-      this.showRecord(tooltip, record, { ...artwork, index }, this.areDetailsExpanded(tooltip));
+      this.selectWikipediaImage(
+        tooltip,
+        record,
+        artwork.images,
+        index,
+        this.areDetailsExpanded(tooltip)
+      );
     }), navigation.createEl("button", {
       cls: "chemhover-use-rdkit",
       text: "Use RDKit",
       attr: { type: "button", "aria-label": "Use the RDKit structure instead" }
     }).addEventListener("click", () => {
-      this.showRdkitFallback(tooltip, record);
+      this.showRdkitFallback(tooltip, record, artwork.images, {
+        source: "rdkit",
+        fileTitle: currentImage.fileTitle
+      });
     });
+  }
+  addWikipediaRestoreControl(container, tooltip, record, images) {
+    container.createDiv({ cls: "chemhover-image-controls" }).createEl("button", {
+      cls: "chemhover-use-wikipedia",
+      text: "Use Wikipedia",
+      attr: { type: "button" }
+    }).addEventListener("click", () => {
+      let selectedTitle = record.artworkPreference?.fileTitle, selectedIndex = selectedTitle ? images.findIndex((image) => image.fileTitle === selectedTitle) : -1;
+      this.selectWikipediaImage(
+        tooltip,
+        record,
+        images,
+        selectedIndex >= 0 ? selectedIndex : 0,
+        this.areDetailsExpanded(tooltip)
+      );
+    });
+  }
+  async selectWikipediaImage(tooltip, record, images, index, detailsOpen) {
+    let selected = images[index];
+    if (!selected) return;
+    let preference = {
+      source: "wikipedia",
+      fileTitle: selected.fileTitle
+    };
+    !await this.persistArtworkPreference(record, preference) || !tooltip.isConnected || this.showRecord(tooltip, record, { source: "wikipedia", images, index }, detailsOpen);
   }
   navigateImage(direction) {
     let navigation = this.imageNavigation;
     if (!navigation) return;
     let index = (navigation.index + direction + navigation.images.length) % navigation.images.length;
-    this.showRecord(
+    this.selectWikipediaImage(
       navigation.tooltip,
       navigation.record,
-      { source: "wikipedia", images: navigation.images, index },
+      navigation.images,
+      index,
       this.areDetailsExpanded(navigation.tooltip)
     );
   }
   areDetailsExpanded(tooltip) {
     return tooltip.querySelector(".chemhover-collapsible")?.open ?? !1;
   }
-  async showRdkitFallback(tooltip, record) {
+  async showRdkitFallback(tooltip, record, images = [], preference) {
     let detailsOpen = this.areDetailsExpanded(tooltip);
     try {
       let svg = await this.renderer.render(record.smiles);
-      tooltip.isConnected && this.showRecord(tooltip, record, { source: "rdkit", svg }, detailsOpen);
+      if (tooltip.isConnected) {
+        if (preference && !await this.persistArtworkPreference(record, preference)) return;
+        this.showRecord(tooltip, record, { source: "rdkit", svg, images }, detailsOpen);
+      }
     } catch (error) {
       console.error("ChemHover could not render the RDKit fallback.", error), this.showMessage(
         tooltip,
         error instanceof Error ? error.message : "The chemical structure image and RDKit fallback could not be loaded."
       );
+    }
+  }
+  async persistArtworkPreference(record, preference) {
+    try {
+      return await this.resolver.setArtworkPreference(record.cid, preference), record.artworkPreference = preference, !0;
+    } catch (error) {
+      return console.error("ChemHover could not save the selected structure artwork.", error), new import_obsidian2.Notice("ChemHover could not save the selected structure artwork. See the developer console."), !1;
     }
   }
   addDetail(container, label, value) {
@@ -2618,6 +2700,9 @@ var ChemicalResolver = class {
       () => this.pending.delete(key),
       () => this.pending.delete(key)
     ), request2;
+  }
+  setArtworkPreference(cid, preference) {
+    return this.cache.setArtworkPreference(cid, preference);
   }
   async refreshAll() {
     let records = this.cache.allChemicals(), refreshed = 0;

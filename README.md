@@ -26,6 +26,8 @@ is saved for subsequent uses.
 Expand **Details** below the image to view the compound name and properties,
 cycle through Wikipedia structure matches with the buttons or left/right arrow
 keys while hovering, or select **Use RDKit** to switch to the local rendering.
+Your image or RDKit choice is saved per compound; select **Use Wikipedia** to
+switch back to the saved image.
 
 ## Development
 

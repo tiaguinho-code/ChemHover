@@ -1,5 +1,8 @@
-import { sanitizeHTMLToDom } from "obsidian";
-import { ChemicalRecord } from "../database/cache";
+import { Notice, sanitizeHTMLToDom } from "obsidian";
+import {
+  ChemicalArtworkPreference,
+  ChemicalRecord,
+} from "../database/cache";
 import { ChemicalResolver } from "../pubchem/resolver";
 import { RDKitRenderer } from "../renderer/rdkit-renderer";
 import {
@@ -13,7 +16,7 @@ type ChemicalArtwork =
       images: WikipediaStructureImage[];
       index: number;
     }
-  | { source: "rdkit"; svg: string };
+  | { source: "rdkit"; svg: string; images?: WikipediaStructureImage[] };
 
 export class ChemicalPreview {
   private tooltip?: HTMLElement;
@@ -118,8 +121,21 @@ export class ChemicalPreview {
     }
     if (!tooltip.isConnected) return;
 
+    if (record.artworkPreference?.source === "rdkit") {
+      await this.showRdkitFallback(tooltip, record, images);
+      return;
+    }
+
     if (images.length) {
-      this.showRecord(tooltip, record, { source: "wikipedia", images, index: 0 });
+      const selectedTitle = record.artworkPreference?.fileTitle;
+      const selectedIndex = selectedTitle
+        ? images.findIndex((image) => image.fileTitle === selectedTitle)
+        : -1;
+      this.showRecord(tooltip, record, {
+        source: "wikipedia",
+        images,
+        index: selectedIndex >= 0 ? selectedIndex : 0,
+      });
       return;
     }
     await this.showRdkitFallback(tooltip, record);
@@ -189,6 +205,8 @@ export class ChemicalPreview {
 
     if (artwork.source === "wikipedia") {
       this.addWikipediaControls(detailsContent, tooltip, record, artwork);
+    } else if (artwork.images?.length) {
+      this.addWikipediaRestoreControl(detailsContent, tooltip, record, artwork.images);
     }
   }
 
@@ -222,7 +240,13 @@ export class ChemicalPreview {
     previous.disabled = artwork.images.length < 2;
     previous.addEventListener("click", () => {
       const index = (artwork.index - 1 + artwork.images.length) % artwork.images.length;
-      this.showRecord(tooltip, record, { ...artwork, index }, this.areDetailsExpanded(tooltip));
+      void this.selectWikipediaImage(
+        tooltip,
+        record,
+        artwork.images,
+        index,
+        this.areDetailsExpanded(tooltip),
+      );
     });
 
     navigation.createSpan({
@@ -237,7 +261,13 @@ export class ChemicalPreview {
     next.disabled = artwork.images.length < 2;
     next.addEventListener("click", () => {
       const index = (artwork.index + 1) % artwork.images.length;
-      this.showRecord(tooltip, record, { ...artwork, index }, this.areDetailsExpanded(tooltip));
+      void this.selectWikipediaImage(
+        tooltip,
+        record,
+        artwork.images,
+        index,
+        this.areDetailsExpanded(tooltip),
+      );
     });
 
     const fallback = navigation.createEl("button", {
@@ -246,8 +276,55 @@ export class ChemicalPreview {
       attr: { type: "button", "aria-label": "Use the RDKit structure instead" },
     });
     fallback.addEventListener("click", () => {
-      void this.showRdkitFallback(tooltip, record);
+      void this.showRdkitFallback(tooltip, record, artwork.images, {
+        source: "rdkit",
+        fileTitle: currentImage.fileTitle,
+      });
     });
+  }
+
+  private addWikipediaRestoreControl(
+    container: HTMLElement,
+    tooltip: HTMLElement,
+    record: ChemicalRecord,
+    images: WikipediaStructureImage[],
+  ): void {
+    const controls = container.createDiv({ cls: "chemhover-image-controls" });
+    const restore = controls.createEl("button", {
+      cls: "chemhover-use-wikipedia",
+      text: "Use Wikipedia",
+      attr: { type: "button" },
+    });
+    restore.addEventListener("click", () => {
+      const selectedTitle = record.artworkPreference?.fileTitle;
+      const selectedIndex = selectedTitle
+        ? images.findIndex((image) => image.fileTitle === selectedTitle)
+        : -1;
+      void this.selectWikipediaImage(
+        tooltip,
+        record,
+        images,
+        selectedIndex >= 0 ? selectedIndex : 0,
+        this.areDetailsExpanded(tooltip),
+      );
+    });
+  }
+
+  private async selectWikipediaImage(
+    tooltip: HTMLElement,
+    record: ChemicalRecord,
+    images: WikipediaStructureImage[],
+    index: number,
+    detailsOpen: boolean,
+  ): Promise<void> {
+    const selected = images[index];
+    if (!selected) return;
+    const preference: ChemicalArtworkPreference = {
+      source: "wikipedia",
+      fileTitle: selected.fileTitle,
+    };
+    if (!(await this.persistArtworkPreference(record, preference)) || !tooltip.isConnected) return;
+    this.showRecord(tooltip, record, { source: "wikipedia", images, index }, detailsOpen);
   }
 
   private navigateImage(direction: -1 | 1): void {
@@ -255,10 +332,11 @@ export class ChemicalPreview {
     if (!navigation) return;
     const index =
       (navigation.index + direction + navigation.images.length) % navigation.images.length;
-    this.showRecord(
+    void this.selectWikipediaImage(
       navigation.tooltip,
       navigation.record,
-      { source: "wikipedia", images: navigation.images, index },
+      navigation.images,
+      index,
       this.areDetailsExpanded(navigation.tooltip),
     );
   }
@@ -270,12 +348,15 @@ export class ChemicalPreview {
   private async showRdkitFallback(
     tooltip: HTMLElement,
     record: ChemicalRecord,
+    images: WikipediaStructureImage[] = [],
+    preference?: ChemicalArtworkPreference,
   ): Promise<void> {
     const detailsOpen = this.areDetailsExpanded(tooltip);
     try {
       const svg = await this.renderer.render(record.smiles);
       if (tooltip.isConnected) {
-        this.showRecord(tooltip, record, { source: "rdkit", svg }, detailsOpen);
+        if (preference && !(await this.persistArtworkPreference(record, preference))) return;
+        this.showRecord(tooltip, record, { source: "rdkit", svg, images }, detailsOpen);
       }
     } catch (error) {
       console.error("ChemHover could not render the RDKit fallback.", error);
@@ -285,6 +366,21 @@ export class ChemicalPreview {
           ? error.message
           : "The chemical structure image and RDKit fallback could not be loaded.",
       );
+    }
+  }
+
+  private async persistArtworkPreference(
+    record: ChemicalRecord,
+    preference: ChemicalArtworkPreference,
+  ): Promise<boolean> {
+    try {
+      await this.resolver.setArtworkPreference(record.cid, preference);
+      record.artworkPreference = preference;
+      return true;
+    } catch (error) {
+      console.error("ChemHover could not save the selected structure artwork.", error);
+      new Notice("ChemHover could not save the selected structure artwork. See the developer console.");
+      return false;
     }
   }
 

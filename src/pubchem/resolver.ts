@@ -1,5 +1,9 @@
 import { App, requestUrl, SuggestModal } from "obsidian";
-import { ChemicalCache, ChemicalRecord } from "../database/cache";
+import {
+  ChemicalArtworkPreference,
+  ChemicalCache,
+  ChemicalRecord,
+} from "../database/cache";
 
 interface PubChemCidResponse {
   IdentifierList?: { CID?: number[] };
@@ -123,6 +127,10 @@ export class ChemicalResolver {
       () => this.pending.delete(key),
     );
     return request;
+  }
+
+  setArtworkPreference(cid: number, preference: ChemicalArtworkPreference): Promise<void> {
+    return this.cache.setArtworkPreference(cid, preference);
   }
 
   async refreshAll(): Promise<number> {

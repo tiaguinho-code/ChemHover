@@ -7,7 +7,12 @@ export interface ChemicalRecord {
   formula: string;
   molecularWeight: number;
   smiles: string;
+  artworkPreference?: ChemicalArtworkPreference;
 }
+
+export type ChemicalArtworkPreference =
+  | { source: "wikipedia"; fileTitle: string }
+  | { source: "rdkit"; fileTitle?: string };
 
 interface CacheData {
   version: 1;
@@ -17,6 +22,19 @@ interface CacheData {
 }
 
 const NEGATIVE_CACHE_TTL = 24 * 60 * 60 * 1000;
+
+function isChemicalArtworkPreference(value: unknown): value is ChemicalArtworkPreference {
+  if (!value || typeof value !== "object") return false;
+  const preference = value as { source?: unknown; fileTitle?: unknown };
+  if (preference.source === "wikipedia") {
+    return typeof preference.fileTitle === "string" && preference.fileTitle.length > 0;
+  }
+  return (
+    preference.source === "rdkit" &&
+    (preference.fileTitle === undefined ||
+      (typeof preference.fileTitle === "string" && preference.fileTitle.length > 0))
+  );
+}
 
 export class ChemicalCache {
   private chemicals = new Map<number, ChemicalRecord>();
@@ -39,11 +57,18 @@ export class ChemicalCache {
         typeof record.formula === "string" &&
         Number.isFinite(record.molecularWeight)
       ) {
+        const artworkPreference = record.artworkPreference;
+        if (artworkPreference !== undefined && !isChemicalArtworkPreference(artworkPreference)) {
+          console.warn(`ChemHover ignored invalid artwork preference for cached chemical "${key}".`);
+        }
         this.chemicals.set(record.cid, {
           ...record,
           synonyms: Array.isArray(record.synonyms)
             ? record.synonyms.filter((value): value is string => typeof value === "string")
             : [],
+          artworkPreference: isChemicalArtworkPreference(artworkPreference)
+            ? artworkPreference
+            : undefined,
         });
       } else {
         console.warn(`ChemHover ignored invalid cached chemical record "${key}".`);
@@ -84,7 +109,11 @@ export class ChemicalCache {
   }
 
   async remember(name: string, record: ChemicalRecord): Promise<void> {
-    this.chemicals.set(record.cid, record);
+    this.chemicals.set(record.cid, {
+      ...record,
+      artworkPreference:
+        record.artworkPreference ?? this.chemicals.get(record.cid)?.artworkPreference,
+    });
     const requestedAlias = normalizeChemicalName(name);
     this.aliases.set(requestedAlias, record.cid);
     this.aliases.set(normalizeChemicalName(record.name), record.cid);
@@ -102,11 +131,22 @@ export class ChemicalCache {
   }
 
   async replace(record: ChemicalRecord): Promise<void> {
-    this.chemicals.set(record.cid, record);
+    this.chemicals.set(record.cid, {
+      ...record,
+      artworkPreference:
+        record.artworkPreference ?? this.chemicals.get(record.cid)?.artworkPreference,
+    });
     this.aliases.set(normalizeChemicalName(record.name), record.cid);
     for (const synonym of record.synonyms) {
       this.aliases.set(normalizeChemicalName(synonym), record.cid);
     }
+    await this.save();
+  }
+
+  async setArtworkPreference(cid: number, preference: ChemicalArtworkPreference): Promise<void> {
+    const record = this.chemicals.get(cid);
+    if (!record) throw new Error(`Cannot save artwork preference for uncached chemical CID ${cid}.`);
+    this.chemicals.set(cid, { ...record, artworkPreference: preference });
     await this.save();
   }
 
