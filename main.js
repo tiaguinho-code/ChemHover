@@ -3467,11 +3467,199 @@ var ChemicalCache = class {
   }
 };
 
+// src/wikipedia/structure-resolver.ts
+var API_ROOT = "https://en.wikipedia.org/w/api.php";
+var REQUEST_TIMEOUT_MS = 1e4;
+var MAX_FILES_TO_INSPECT = 50;
+var MAX_STRUCTURE_IMAGES = 12;
+var STRUCTURE_TERMS = /\b(skeletal|chemical|structural|molecular|line)\s+(formula|structure|structures)\b|\bstructure of\b/i;
+var STRUCTURE_FILENAME_TERMS = /\b(skeletal|chemical|structural|molecular|molecule|2d|structure|formula)\b/i;
+var NON_STRUCTURE_TERMS = /\b(map|maps|world|death|deaths|rate|rates|overdose|overdoses|timeline|chart|graph|powder|tablet|package|bottle|synthesis|mechanism|logo|icon|side effects|photo|portrait|leaf|plant)\b/i;
+function apiUrl(parameters) {
+  const query = new URLSearchParams({
+    action: "query",
+    format: "json",
+    origin: "*",
+    ...parameters
+  });
+  return `${API_ROOT}?${query.toString()}`;
+}
+function normalizeText(value) {
+  return value.toLocaleLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+function stripHtml(value) {
+  return value.replace(/<[^>]*>/g, " ").replace(/&nbsp;/gi, " ");
+}
+function isLikelyImageFile(fileTitle, searchName, pageTitle) {
+  const filename = normalizeText(fileTitle.replace(/^File:/i, ""));
+  const matchesName = [searchName, pageTitle].some((name) => {
+    const normalizedName = normalizeText(name);
+    return normalizedName.length > 2 && filename.includes(normalizedName);
+  });
+  return matchesName || STRUCTURE_FILENAME_TERMS.test(filename);
+}
+function scoreStructureImage(fileTitle, imageInfo, searchName, pageTitle) {
+  const metadata = imageInfo.extmetadata;
+  const details = [
+    fileTitle,
+    metadata?.ObjectName?.value,
+    metadata?.ImageDescription?.value,
+    metadata?.Categories?.value
+  ].filter((value) => Boolean(value)).map(stripHtml).join(" ");
+  const normalizedDetails = normalizeText(details);
+  const matchesName = [searchName, pageTitle].some((name) => {
+    const normalizedName = normalizeText(name);
+    return normalizedName.length > 2 && normalizedDetails.includes(normalizedName);
+  });
+  if (!matchesName || !STRUCTURE_TERMS.test(details) || NON_STRUCTURE_TERMS.test(details)) {
+    return Number.NEGATIVE_INFINITY;
+  }
+  let score = 100;
+  if (/chemical structures|skeletal formula|structural formula/i.test(details)) score += 40;
+  if (/\.svg$/i.test(fileTitle)) score += 20;
+  return score;
+}
+function isWikimediaUrl(value) {
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" && (url.hostname === "wikimedia.org" || url.hostname.endsWith(".wikimedia.org"));
+  } catch {
+    return false;
+  }
+}
+function isSourcePageUrl(value) {
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" && (url.hostname === "wikipedia.org" || url.hostname.endsWith(".wikipedia.org") || url.hostname === "wikimedia.org" || url.hostname.endsWith(".wikimedia.org"));
+  } catch {
+    return false;
+  }
+}
+var WikipediaStructureResolver = class {
+  constructor() {
+    this.cache = /* @__PURE__ */ new Map();
+    this.pending = /* @__PURE__ */ new Map();
+  }
+  resolve(name) {
+    const title = name.normalize("NFKC").trim().replace(/\s+/g, " ");
+    const key = title.toLocaleLowerCase();
+    if (!key) return Promise.resolve([]);
+    if (this.cache.has(key)) return Promise.resolve(this.cache.get(key) ?? []);
+    const ongoing = this.pending.get(key);
+    if (ongoing) return ongoing;
+    const request = this.fetchStructureImages(title);
+    this.pending.set(key, request);
+    void request.then(
+      (images) => {
+        this.cache.set(key, images);
+        this.pending.delete(key);
+      },
+      () => this.pending.delete(key)
+    );
+    return request;
+  }
+  async fetchStructureImages(searchName) {
+    const pageResponse = await fetch(
+      apiUrl({
+        titles: searchName,
+        redirects: "1",
+        prop: "images|info",
+        inprop: "url",
+        imlimit: "max"
+      }),
+      {
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        headers: { Accept: "application/json" }
+      }
+    );
+    if (pageResponse.status === 404) return [];
+    if (!pageResponse.ok) {
+      throw new Error(
+        `Wikipedia request failed (${pageResponse.status} ${pageResponse.statusText}).`
+      );
+    }
+    const pageData = await pageResponse.json();
+    const page = Object.values(pageData.query?.pages ?? {}).find(
+      (candidate) => typeof candidate.pageid === "number" && candidate.pageid > 0
+    );
+    if (!page?.title || !page.images?.length) return [];
+    const candidates = page.images.filter(({ title }) => isLikelyImageFile(title, searchName, page.title ?? "")).slice(0, MAX_FILES_TO_INSPECT);
+    if (!candidates.length) return [];
+    const imageResponse = await fetch(
+      apiUrl({
+        titles: candidates.map(({ title }) => title).join("|"),
+        prop: "imageinfo",
+        iiprop: "url|extmetadata",
+        iiurlwidth: "500"
+      }),
+      {
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        headers: { Accept: "application/json" }
+      }
+    );
+    if (imageResponse.status === 404) return [];
+    if (!imageResponse.ok) {
+      throw new Error(
+        `Wikimedia image request failed (${imageResponse.status} ${imageResponse.statusText}).`
+      );
+    }
+    const imageData = await imageResponse.json();
+    return Object.values(imageData.query?.pages ?? {}).flatMap(
+      (file) => (file.imageinfo ?? []).map((imageInfo) => ({
+        fileTitle: file.title ?? "",
+        imageInfo
+      }))
+    ).map(({ fileTitle, imageInfo }) => ({
+      fileTitle,
+      imageInfo,
+      score: scoreStructureImage(fileTitle, imageInfo, searchName, page.title ?? "")
+    })).filter(({ score }) => score > 0).sort((left, right) => right.score - left.score).slice(0, MAX_STRUCTURE_IMAGES).flatMap(({ fileTitle, imageInfo }) => {
+      const imageUrl = imageInfo.thumburl ?? imageInfo.url;
+      const pageUrl = imageInfo.descriptionurl ?? imageInfo.descriptionshorturl;
+      if (!imageUrl || !pageUrl || !isWikimediaUrl(imageUrl) || !isSourcePageUrl(pageUrl)) {
+        return [];
+      }
+      return [
+        {
+          fileTitle: fileTitle.replace(/^File:/i, ""),
+          imageUrl,
+          pageUrl,
+          license: imageInfo.extmetadata?.LicenseShortName?.value
+        }
+      ];
+    });
+  }
+};
+
 // src/hover/preview.ts
 var ChemicalPreview = class {
-  constructor(resolver, renderer) {
+  constructor(resolver, renderer, wikipedia = new WikipediaStructureResolver()) {
     this.resolver = resolver;
     this.renderer = renderer;
+    this.wikipedia = wikipedia;
+    this.handleKeydown = (event) => {
+      const navigation = this.imageNavigation;
+      if (!navigation || navigation.images.length < 2 || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey || !navigation.tooltip.matches(":hover") && !this.hoverTarget?.matches(":hover")) {
+        return;
+      }
+      const target = event.target;
+      if (target instanceof HTMLElement && target.closest("input, textarea, select, [contenteditable='true']")) {
+        return;
+      }
+      if (event.key === "ArrowLeft") {
+        this.navigateImage(-1);
+      } else if (event.key === "ArrowRight") {
+        this.navigateImage(1);
+      } else {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+    };
+  }
+  destroy() {
+    window.clearTimeout(this.hideTimer);
+    this.removeTooltip();
   }
   show(target, name) {
     window.clearTimeout(this.hideTimer);
@@ -3484,6 +3672,8 @@ var ChemicalPreview = class {
     tooltip.textContent = "Looking up chemical\u2026";
     document.body.appendChild(tooltip);
     this.tooltip = tooltip;
+    this.hoverTarget = target;
+    document.addEventListener("keydown", this.handleKeydown, true);
     this.position(tooltip, target);
     void this.loadPreview(tooltip, name);
   }
@@ -3492,29 +3682,79 @@ var ChemicalPreview = class {
     this.hideTimer = window.setTimeout(() => this.removeTooltip(), 160);
   }
   async loadPreview(tooltip, name) {
+    let record;
     try {
-      const record = await this.resolver.resolve(name);
-      if (!record) {
-        this.showMessage(tooltip, "No chemical selected or no PubChem match was found.");
-        return;
-      }
-      const svg = await this.renderer.render(record.smiles);
-      if (!tooltip.isConnected) return;
-      this.showRecord(tooltip, record, svg);
+      record = await this.resolver.resolve(name);
     } catch (error) {
-      console.error("ChemHover could not load a chemical preview.", error);
+      console.error("ChemHover could not resolve the chemical preview.", error);
       this.showMessage(
         tooltip,
         error instanceof Error ? error.message : "The chemical preview could not be loaded."
       );
+      return;
     }
+    if (!record) {
+      this.showMessage(tooltip, "No chemical selected or no PubChem match was found.");
+      return;
+    }
+    let images = [];
+    try {
+      images = await this.wikipedia.resolve(name);
+    } catch (error) {
+      console.warn("ChemHover could not look up a Wikipedia structure image; using RDKit.", error);
+    }
+    if (!tooltip.isConnected) return;
+    if (images.length) {
+      this.showRecord(tooltip, record, { source: "wikipedia", images, index: 0 });
+      return;
+    }
+    await this.showRdkitFallback(tooltip, record);
   }
-  showRecord(tooltip, record, svg) {
+  showRecord(tooltip, record, artwork, detailsOpen = false) {
     tooltip.replaceChildren();
-    tooltip.createEl("div", { cls: "chemhover-title", text: record.name });
     const structure = tooltip.createDiv({ cls: "chemhover-structure" });
-    structure.innerHTML = svg;
-    const details = tooltip.createDiv({ cls: "chemhover-details" });
+    if (artwork.source === "wikipedia") {
+      this.imageNavigation = {
+        tooltip,
+        record,
+        images: artwork.images,
+        index: artwork.index
+      };
+      const currentImage = artwork.images[artwork.index];
+      const image = structure.createEl("img", {
+        attr: {
+          src: currentImage.imageUrl,
+          alt: `${record.name} structure (${currentImage.fileTitle})`
+        }
+      });
+      image.addEventListener(
+        "error",
+        () => {
+          if (!tooltip.isConnected) return;
+          console.warn("ChemHover could not load the Wikipedia image; using RDKit.");
+          const remaining = artwork.images.filter((_, index) => index !== artwork.index);
+          if (remaining.length) {
+            this.showRecord(tooltip, record, {
+              source: "wikipedia",
+              images: remaining,
+              index: Math.min(artwork.index, remaining.length - 1)
+            }, this.areDetailsExpanded(tooltip));
+          } else {
+            void this.showRdkitFallback(tooltip, record);
+          }
+        },
+        { once: true }
+      );
+    } else {
+      structure.innerHTML = artwork.svg;
+      this.imageNavigation = void 0;
+    }
+    const detailsPanel = tooltip.createEl("details", { cls: "chemhover-collapsible" });
+    detailsPanel.open = detailsOpen;
+    detailsPanel.createEl("summary", { text: "Details" });
+    const detailsContent = detailsPanel.createDiv({ cls: "chemhover-collapsible-content" });
+    detailsContent.createEl("div", { cls: "chemhover-title", text: record.name });
+    const details = detailsContent.createDiv({ cls: "chemhover-details" });
     this.addDetail(details, "Formula", record.formula || "Not available");
     this.addDetail(
       details,
@@ -3525,6 +3765,84 @@ var ChemicalPreview = class {
       this.addDetail(details, "Synonyms", record.synonyms.slice(0, 5).join(", "));
     }
     this.addDetail(details, "PubChem CID", String(record.cid));
+    if (artwork.source === "wikipedia") {
+      this.addWikipediaControls(detailsContent, tooltip, record, artwork);
+    }
+  }
+  addWikipediaControls(container, tooltip, record, artwork) {
+    const currentImage = artwork.images[artwork.index];
+    const controls = container.createDiv({ cls: "chemhover-image-controls" });
+    const source = controls.createEl("a", {
+      cls: "chemhover-image-source",
+      text: currentImage.license ? `Image source \xB7 ${currentImage.license}` : "Image source & license",
+      attr: {
+        href: currentImage.pageUrl,
+        target: "_blank",
+        rel: "noopener noreferrer",
+        title: currentImage.fileTitle
+      }
+    });
+    source.setAttribute("aria-label", `Image source and license for ${currentImage.fileTitle}`);
+    const navigation = controls.createDiv({ cls: "chemhover-image-navigation" });
+    const previous = navigation.createEl("button", {
+      text: "\u2039",
+      attr: { type: "button", "aria-label": "Previous structure image" }
+    });
+    previous.disabled = artwork.images.length < 2;
+    previous.addEventListener("click", () => {
+      const index = (artwork.index - 1 + artwork.images.length) % artwork.images.length;
+      this.showRecord(tooltip, record, { ...artwork, index }, this.areDetailsExpanded(tooltip));
+    });
+    navigation.createSpan({
+      cls: "chemhover-image-count",
+      text: `${artwork.index + 1} / ${artwork.images.length}`
+    });
+    const next = navigation.createEl("button", {
+      text: "\u203A",
+      attr: { type: "button", "aria-label": "Next structure image" }
+    });
+    next.disabled = artwork.images.length < 2;
+    next.addEventListener("click", () => {
+      const index = (artwork.index + 1) % artwork.images.length;
+      this.showRecord(tooltip, record, { ...artwork, index }, this.areDetailsExpanded(tooltip));
+    });
+    const fallback = navigation.createEl("button", {
+      cls: "chemhover-use-rdkit",
+      text: "Use RDKit",
+      attr: { type: "button", "aria-label": "Use the RDKit structure instead" }
+    });
+    fallback.addEventListener("click", () => {
+      void this.showRdkitFallback(tooltip, record);
+    });
+  }
+  navigateImage(direction) {
+    const navigation = this.imageNavigation;
+    if (!navigation) return;
+    const index = (navigation.index + direction + navigation.images.length) % navigation.images.length;
+    this.showRecord(
+      navigation.tooltip,
+      navigation.record,
+      { source: "wikipedia", images: navigation.images, index },
+      this.areDetailsExpanded(navigation.tooltip)
+    );
+  }
+  areDetailsExpanded(tooltip) {
+    return tooltip.querySelector(".chemhover-collapsible")?.open ?? false;
+  }
+  async showRdkitFallback(tooltip, record) {
+    const detailsOpen = this.areDetailsExpanded(tooltip);
+    try {
+      const svg = await this.renderer.render(record.smiles);
+      if (tooltip.isConnected) {
+        this.showRecord(tooltip, record, { source: "rdkit", svg }, detailsOpen);
+      }
+    } catch (error) {
+      console.error("ChemHover could not render the RDKit fallback.", error);
+      this.showMessage(
+        tooltip,
+        error instanceof Error ? error.message : "The chemical structure image and RDKit fallback could not be loaded."
+      );
+    }
   }
   addDetail(container, label, value) {
     const row = container.createDiv({ cls: "chemhover-detail" });
@@ -3546,13 +3864,16 @@ var ChemicalPreview = class {
   removeTooltip() {
     this.tooltip?.remove();
     this.tooltip = void 0;
+    this.hoverTarget = void 0;
+    this.imageNavigation = void 0;
+    document.removeEventListener("keydown", this.handleKeydown, true);
   }
 };
 
 // src/pubchem/resolver.ts
 var import_obsidian = require("obsidian");
-var API_ROOT = "https://pubchem.ncbi.nlm.nih.gov/rest/pug";
-var REQUEST_TIMEOUT_MS = 15e3;
+var API_ROOT2 = "https://pubchem.ncbi.nlm.nih.gov/rest/pug";
+var REQUEST_TIMEOUT_MS2 = 15e3;
 function chooseCandidate(app, searchName, candidates) {
   return new Promise((resolve) => {
     let completed = false;
@@ -3583,7 +3904,7 @@ function chooseCandidate(app, searchName, candidates) {
 }
 async function requestJson(url) {
   const response = await fetch(url, {
-    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS2),
     headers: { Accept: "application/json" }
   });
   if (!response.ok) {
@@ -3592,7 +3913,7 @@ async function requestJson(url) {
   return await response.json();
 }
 function propertiesUrl(cids, fields) {
-  return `${API_ROOT}/compound/cid/${cids.join(",")}/property/${fields}/JSON`;
+  return `${API_ROOT2}/compound/cid/${cids.join(",")}/property/${fields}/JSON`;
 }
 var ChemicalResolver = class {
   constructor(app, cache) {
@@ -3627,7 +3948,7 @@ var ChemicalResolver = class {
   }
   async resolveUncached(name) {
     const cidsResponse = await requestJson(
-      `${API_ROOT}/compound/name/${encodeURIComponent(name)}/cids/JSON`
+      `${API_ROOT2}/compound/name/${encodeURIComponent(name)}/cids/JSON`
     );
     const cids = [...new Set(cidsResponse.IdentifierList?.CID ?? [])].filter((cid) => Number.isInteger(cid) && cid > 0);
     if (cids.length === 0) {
@@ -3687,7 +4008,7 @@ var ChemicalResolver = class {
       throw new Error(`PubChem returned an invalid molecular weight for CID ${cid}.`);
     }
     const synonymsResponse = await requestJson(
-      `${API_ROOT}/compound/cid/${cid}/synonyms/JSON`
+      `${API_ROOT2}/compound/cid/${cid}/synonyms/JSON`
     );
     const synonyms = [...new Set(synonymsResponse.InformationList?.Information?.[0]?.Synonym ?? [])].filter((synonym) => synonym.toLocaleLowerCase() !== (property.IUPACName ?? "").toLocaleLowerCase()).slice(0, 30);
     return {
@@ -3752,6 +4073,7 @@ var ChemHoverPlugin = class extends import_obsidian2.Plugin {
     const wasmUrl = this.app.vault.adapter.getResourcePath(wasmPath);
     const renderer = new RDKitRenderer(wasmUrl);
     this.preview = new ChemicalPreview(this.resolver, renderer);
+    this.register(() => this.preview.destroy());
     this.registerMarkdownPostProcessor(
       (element, context) => this.processReadingView(element, context)
     );
