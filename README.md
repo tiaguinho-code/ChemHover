@@ -23,8 +23,9 @@ The source Markdown is not changed. Tokens are recognized in Reading view and
 Live Preview, outside code spans/blocks and math. When PubChem returns multiple
 compounds, choose the intended result from the selection list; that association
 is saved for subsequent uses.
-When Wikipedia structure images are available, use the arrows to cycle through
-matches or select **Use RDKit** to switch to the local rendering.
+Expand **Details** below the image to view the compound name and properties,
+cycle through Wikipedia structure matches with the buttons or left/right arrow
+keys while hovering, or select **Use RDKit** to switch to the local rendering.
 
 ## Development
 

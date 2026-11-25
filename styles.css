@@ -87,6 +87,24 @@ body.theme-dark .chemhover-structure img {
   white-space: nowrap;
 }
 
+.chemhover-collapsible {
+  margin-top: 6px;
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+.chemhover-collapsible summary {
+  padding: 6px 0 2px;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: var(--font-ui-small);
+}
+
+.chemhover-collapsible-content {
+  display: grid;
+  gap: 6px;
+  padding-bottom: 4px;
+}
+
 .chemhover-details {
   display: grid;
   gap: 4px;

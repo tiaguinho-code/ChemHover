@@ -30,6 +30,7 @@ export default class ChemHoverPlugin extends Plugin {
     const wasmUrl = this.app.vault.adapter.getResourcePath(wasmPath);
     const renderer = new RDKitRenderer(wasmUrl);
     this.preview = new ChemicalPreview(this.resolver, renderer);
+    this.register(() => this.preview.destroy());
 
     this.registerMarkdownPostProcessor((element, context) =>
       this.processReadingView(element, context),

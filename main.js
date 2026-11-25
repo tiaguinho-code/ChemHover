@@ -3637,6 +3637,29 @@ var ChemicalPreview = class {
     this.resolver = resolver;
     this.renderer = renderer;
     this.wikipedia = wikipedia;
+    this.handleKeydown = (event) => {
+      const navigation = this.imageNavigation;
+      if (!navigation || navigation.images.length < 2 || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey || !navigation.tooltip.matches(":hover") && !this.hoverTarget?.matches(":hover")) {
+        return;
+      }
+      const target = event.target;
+      if (target instanceof HTMLElement && target.closest("input, textarea, select, [contenteditable='true']")) {
+        return;
+      }
+      if (event.key === "ArrowLeft") {
+        this.navigateImage(-1);
+      } else if (event.key === "ArrowRight") {
+        this.navigateImage(1);
+      } else {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+    };
+  }
+  destroy() {
+    window.clearTimeout(this.hideTimer);
+    this.removeTooltip();
   }
   show(target, name) {
     window.clearTimeout(this.hideTimer);
@@ -3649,6 +3672,8 @@ var ChemicalPreview = class {
     tooltip.textContent = "Looking up chemical\u2026";
     document.body.appendChild(tooltip);
     this.tooltip = tooltip;
+    this.hoverTarget = target;
+    document.addEventListener("keydown", this.handleKeydown, true);
     this.position(tooltip, target);
     void this.loadPreview(tooltip, name);
   }
@@ -3685,11 +3710,16 @@ var ChemicalPreview = class {
     }
     await this.showRdkitFallback(tooltip, record);
   }
-  showRecord(tooltip, record, artwork) {
+  showRecord(tooltip, record, artwork, detailsOpen = false) {
     tooltip.replaceChildren();
-    tooltip.createEl("div", { cls: "chemhover-title", text: record.name });
     const structure = tooltip.createDiv({ cls: "chemhover-structure" });
     if (artwork.source === "wikipedia") {
+      this.imageNavigation = {
+        tooltip,
+        record,
+        images: artwork.images,
+        index: artwork.index
+      };
       const currentImage = artwork.images[artwork.index];
       const image = structure.createEl("img", {
         attr: {
@@ -3708,18 +3738,23 @@ var ChemicalPreview = class {
               source: "wikipedia",
               images: remaining,
               index: Math.min(artwork.index, remaining.length - 1)
-            });
+            }, this.areDetailsExpanded(tooltip));
           } else {
             void this.showRdkitFallback(tooltip, record);
           }
         },
         { once: true }
       );
-      this.addWikipediaControls(tooltip, record, structure, artwork, currentImage);
     } else {
       structure.innerHTML = artwork.svg;
+      this.imageNavigation = void 0;
     }
-    const details = tooltip.createDiv({ cls: "chemhover-details" });
+    const detailsPanel = tooltip.createEl("details", { cls: "chemhover-collapsible" });
+    detailsPanel.open = detailsOpen;
+    detailsPanel.createEl("summary", { text: "Details" });
+    const detailsContent = detailsPanel.createDiv({ cls: "chemhover-collapsible-content" });
+    detailsContent.createEl("div", { cls: "chemhover-title", text: record.name });
+    const details = detailsContent.createDiv({ cls: "chemhover-details" });
     this.addDetail(details, "Formula", record.formula || "Not available");
     this.addDetail(
       details,
@@ -3730,9 +3765,13 @@ var ChemicalPreview = class {
       this.addDetail(details, "Synonyms", record.synonyms.slice(0, 5).join(", "));
     }
     this.addDetail(details, "PubChem CID", String(record.cid));
+    if (artwork.source === "wikipedia") {
+      this.addWikipediaControls(detailsContent, tooltip, record, artwork);
+    }
   }
-  addWikipediaControls(tooltip, record, structure, artwork, currentImage) {
-    const controls = structure.createDiv({ cls: "chemhover-image-controls" });
+  addWikipediaControls(container, tooltip, record, artwork) {
+    const currentImage = artwork.images[artwork.index];
+    const controls = container.createDiv({ cls: "chemhover-image-controls" });
     const source = controls.createEl("a", {
       cls: "chemhover-image-source",
       text: currentImage.license ? `Image source \xB7 ${currentImage.license}` : "Image source & license",
@@ -3752,7 +3791,7 @@ var ChemicalPreview = class {
     previous.disabled = artwork.images.length < 2;
     previous.addEventListener("click", () => {
       const index = (artwork.index - 1 + artwork.images.length) % artwork.images.length;
-      this.showRecord(tooltip, record, { ...artwork, index });
+      this.showRecord(tooltip, record, { ...artwork, index }, this.areDetailsExpanded(tooltip));
     });
     navigation.createSpan({
       cls: "chemhover-image-count",
@@ -3765,7 +3804,7 @@ var ChemicalPreview = class {
     next.disabled = artwork.images.length < 2;
     next.addEventListener("click", () => {
       const index = (artwork.index + 1) % artwork.images.length;
-      this.showRecord(tooltip, record, { ...artwork, index });
+      this.showRecord(tooltip, record, { ...artwork, index }, this.areDetailsExpanded(tooltip));
     });
     const fallback = navigation.createEl("button", {
       cls: "chemhover-use-rdkit",
@@ -3776,11 +3815,26 @@ var ChemicalPreview = class {
       void this.showRdkitFallback(tooltip, record);
     });
   }
+  navigateImage(direction) {
+    const navigation = this.imageNavigation;
+    if (!navigation) return;
+    const index = (navigation.index + direction + navigation.images.length) % navigation.images.length;
+    this.showRecord(
+      navigation.tooltip,
+      navigation.record,
+      { source: "wikipedia", images: navigation.images, index },
+      this.areDetailsExpanded(navigation.tooltip)
+    );
+  }
+  areDetailsExpanded(tooltip) {
+    return tooltip.querySelector(".chemhover-collapsible")?.open ?? false;
+  }
   async showRdkitFallback(tooltip, record) {
+    const detailsOpen = this.areDetailsExpanded(tooltip);
     try {
       const svg = await this.renderer.render(record.smiles);
       if (tooltip.isConnected) {
-        this.showRecord(tooltip, record, { source: "rdkit", svg });
+        this.showRecord(tooltip, record, { source: "rdkit", svg }, detailsOpen);
       }
     } catch (error) {
       console.error("ChemHover could not render the RDKit fallback.", error);
@@ -3810,6 +3864,9 @@ var ChemicalPreview = class {
   removeTooltip() {
     this.tooltip?.remove();
     this.tooltip = void 0;
+    this.hoverTarget = void 0;
+    this.imageNavigation = void 0;
+    document.removeEventListener("keydown", this.handleKeydown, true);
   }
 };
 
@@ -4016,6 +4073,7 @@ var ChemHoverPlugin = class extends import_obsidian2.Plugin {
     const wasmUrl = this.app.vault.adapter.getResourcePath(wasmPath);
     const renderer = new RDKitRenderer(wasmUrl);
     this.preview = new ChemicalPreview(this.resolver, renderer);
+    this.register(() => this.preview.destroy());
     this.registerMarkdownPostProcessor(
       (element, context) => this.processReadingView(element, context)
     );
