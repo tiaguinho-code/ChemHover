@@ -37,9 +37,8 @@ npm run typecheck
 npm run build
 ```
 
-The build produces `main.js` and copies RDKit MinimalLib's WebAssembly module
-(`RDKit_minimal.wasm`) beside the plugin manifest. For local testing, copy
-`manifest.json`, `main.js`, `styles.css`, and `RDKit_minimal.wasm` to
+The build embeds a gzip-compressed RDKit MinimalLib WebAssembly module in
+`main.js`. For local testing, copy `manifest.json`, `main.js`, and `styles.css` to
 `<vault>/.obsidian/plugins/chemhover/`, then enable ChemHover in Obsidian.
 `npm run dev` rebuilds the plugin when source files change.
 CodeMirror and Lezer packages are kept external so the editor extension uses

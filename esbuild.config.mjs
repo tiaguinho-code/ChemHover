@@ -1,12 +1,13 @@
 import esbuild from "esbuild";
-import { copyFileSync, mkdirSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { gzipSync } from "node:zlib";
 
 const root = dirname(fileURLToPath(import.meta.url));
 const outdir = resolve(root);
-const wasmSource = resolve(root, "node_modules/@rdkit/rdkit/dist/RDKit_minimal.wasm");
-const wasmTarget = resolve(outdir, "RDKit_minimal.wasm");
+const rdkitLicense = readFileSync(resolve(root, "LICENSES/RDKit.txt"), "utf8");
+const rdkitLicenseComment = `/*!\n${rdkitLicense.trimEnd().split("\n").map((line) => (line ? ` * ${line}` : " *")).join("\n")}\n */`;
 const watch = process.argv.includes("--watch");
 
 const options = {
@@ -19,12 +20,14 @@ const options = {
   outfile: resolve(outdir, "main.js"),
   sourcemap: watch ? "inline" : false,
   plugins: [{
-    name: "copy-rdkit-wasm",
+    name: "gzip-rdkit-wasm",
     setup(build) {
-      build.onEnd((result) => {
-        if (result.errors.length) return;
-        mkdirSync(outdir, { recursive: true });
-        copyFileSync(wasmSource, wasmTarget);
+      build.onLoad({ filter: /RDKit_minimal\.wasm$/ }, ({ path }) => {
+        const compressed = gzipSync(readFileSync(path)).toString("base64");
+        return {
+          contents: `${rdkitLicenseComment}\nexport default ${JSON.stringify(compressed)};`,
+          loader: "js",
+        };
       });
     },
   }],

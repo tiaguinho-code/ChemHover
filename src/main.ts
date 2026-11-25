@@ -24,11 +24,7 @@ export default class ChemHoverPlugin extends Plugin {
     this.cache.load(await this.loadData());
     this.resolver = new ChemicalResolver(this.app, this.cache);
 
-    const pluginDir =
-      this.manifest.dir || `${this.app.vault.configDir}/plugins/${this.manifest.id}`;
-    const wasmPath = `${pluginDir}/RDKit_minimal.wasm`;
-    const wasmUrl = this.app.vault.adapter.getResourcePath(wasmPath);
-    const renderer = new RDKitRenderer(wasmUrl);
+    const renderer = new RDKitRenderer();
     this.preview = new ChemicalPreview(this.resolver, renderer);
     this.register(() => this.preview.destroy());
 

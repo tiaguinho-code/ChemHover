@@ -1,4 +1,5 @@
 import initRDKitModule from "@rdkit/rdkit";
+import wasmBase64 from "@rdkit/rdkit/RDKit_minimal.wasm";
 
 interface RDKitMolecule {
   get_svg(): string;
@@ -12,8 +13,6 @@ interface RDKitModule {
 export class RDKitRenderer {
   private module?: Promise<RDKitModule>;
   private svgCache = new Map<string, string>();
-
-  constructor(private readonly wasmUrl: string) {}
 
   async render(smiles: string): Promise<string> {
     const cached = this.svgCache.get(smiles);
@@ -34,14 +33,15 @@ export class RDKitRenderer {
   }
 
   private async initialize(): Promise<RDKitModule> {
-    const response = await fetch(this.wasmUrl);
-    if (!response.ok) {
-      throw new Error(`Could not load the local RDKit WebAssembly module (${response.status}).`);
+    const binary = atob(wasmBase64);
+    const compressed = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) {
+      compressed[index] = binary.charCodeAt(index);
     }
-    const wasmBinary = await response.arrayBuffer();
-    return (await initRDKitModule({
-      wasmBinary,
-      locateFile: () => this.wasmUrl,
-    })) as RDKitModule;
+    const wasmStream = new Blob([compressed])
+      .stream()
+      .pipeThrough(new DecompressionStream("gzip"));
+    const wasmBinary = await new Response(wasmStream).arrayBuffer();
+    return (await initRDKitModule({ wasmBinary })) as RDKitModule;
   }
 }
