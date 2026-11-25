@@ -4062,6 +4062,22 @@ var RDKitRenderer = class {
 
 // src/main.ts
 var TOKEN_SELECTOR = "[data-chemhover]";
+var ChemicalNameWidget = class _ChemicalNameWidget extends import_view.WidgetType {
+  constructor(name) {
+    super();
+    this.name = name;
+  }
+  eq(other) {
+    return other instanceof _ChemicalNameWidget && other.name === this.name;
+  }
+  toDOM() {
+    return createSpan({
+      cls: "chemhover-token",
+      text: this.name,
+      attr: { "data-chemhover": this.name }
+    });
+  }
+};
 var ChemHoverPlugin = class extends import_obsidian2.Plugin {
   constructor() {
     super(...arguments);
@@ -4121,7 +4137,7 @@ var ChemHoverPlugin = class extends import_obsidian2.Plugin {
         const token = document.createElement("span");
         token.className = "chemhover-token";
         token.dataset.chemhover = expression.name;
-        token.textContent = source.slice(expression.start, expression.end);
+        token.textContent = expression.name;
         token.addEventListener("pointerenter", () => this.preview.show(token, expression.name));
         token.addEventListener("pointerleave", () => this.preview.scheduleHide());
         fragment.append(token);
@@ -4173,10 +4189,7 @@ var ChemHoverPlugin = class extends import_obsidian2.Plugin {
           }
           return import_view.Decoration.set(
             ranges.map(
-              ({ from, to, name }) => import_view.Decoration.mark({
-                class: "chemhover-token",
-                attributes: { "data-chemhover": name }
-              }).range(from, to)
+              ({ from, to, name }) => import_view.Decoration.replace({ widget: new ChemicalNameWidget(name) }).range(from, to)
             )
           );
         }

@@ -4,7 +4,13 @@ import {
   Plugin,
 } from "obsidian";
 import { syntaxTree } from "@codemirror/language";
-import { EditorView, ViewPlugin, Decoration, DecorationSet } from "@codemirror/view";
+import {
+  EditorView,
+  ViewPlugin,
+  Decoration,
+  DecorationSet,
+  WidgetType,
+} from "@codemirror/view";
 import { ChemicalCache } from "./database/cache";
 import { ChemicalPreview } from "./hover/preview";
 import { findChemicalExpressions } from "./parser/chemical-parser";
@@ -12,6 +18,24 @@ import { ChemicalResolver } from "./pubchem/resolver";
 import { RDKitRenderer } from "./renderer/rdkit-renderer";
 
 const TOKEN_SELECTOR = "[data-chemhover]";
+
+class ChemicalNameWidget extends WidgetType {
+  constructor(private readonly name: string) {
+    super();
+  }
+
+  eq(other: WidgetType): boolean {
+    return other instanceof ChemicalNameWidget && other.name === this.name;
+  }
+
+  toDOM(): HTMLElement {
+    return createSpan({
+      cls: "chemhover-token",
+      text: this.name,
+      attr: { "data-chemhover": this.name },
+    });
+  }
+}
 
 export default class ChemHoverPlugin extends Plugin {
   private cache!: ChemicalCache;
@@ -84,7 +108,7 @@ export default class ChemHoverPlugin extends Plugin {
         const token = document.createElement("span");
         token.className = "chemhover-token";
         token.dataset.chemhover = expression.name;
-        token.textContent = source.slice(expression.start, expression.end);
+        token.textContent = expression.name;
         token.addEventListener("pointerenter", () => this.preview.show(token, expression.name));
         token.addEventListener("pointerleave", () => this.preview.scheduleHide());
         fragment.append(token);
@@ -141,10 +165,7 @@ export default class ChemHoverPlugin extends Plugin {
 
           return Decoration.set(
             ranges.map(({ from, to, name }) =>
-              Decoration.mark({
-                class: "chemhover-token",
-                attributes: { "data-chemhover": name },
-              }).range(from, to),
+              Decoration.replace({ widget: new ChemicalNameWidget(name) }).range(from, to),
             ),
           );
         }
