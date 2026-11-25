@@ -35,6 +35,10 @@ class ChemicalNameWidget extends WidgetType {
       attr: { "data-chemhover": this.name },
     });
   }
+
+  ignoreEvent(event: Event): boolean {
+    return event.type !== "pointerover" && event.type !== "pointerout";
+  }
 }
 
 export default class ChemHoverPlugin extends Plugin {

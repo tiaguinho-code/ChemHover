@@ -2739,6 +2739,9 @@ var TOKEN_SELECTOR = "[data-chemhover]", ChemicalNameWidget = class _ChemicalNam
       attr: { "data-chemhover": this.name }
     });
   }
+  ignoreEvent(event) {
+    return event.type !== "pointerover" && event.type !== "pointerout";
+  }
 }, ChemHoverPlugin = class extends import_obsidian4.Plugin {
   constructor() {
     super(...arguments);
