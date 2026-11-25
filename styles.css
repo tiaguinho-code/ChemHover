@@ -56,6 +56,35 @@ body.theme-dark .chemhover-structure img {
 .chemhover-image-source {
   color: var(--text-muted);
   font-size: var(--font-ui-smaller);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chemhover-image-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  margin-top: 4px;
+}
+
+.chemhover-image-navigation {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.chemhover-image-navigation button {
+  padding: 2px 6px;
+}
+
+.chemhover-image-count {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  white-space: nowrap;
 }
 
 .chemhover-details {

@@ -7,7 +7,11 @@ import {
 } from "../wikipedia/structure-resolver";
 
 type ChemicalArtwork =
-  | { source: "wikipedia"; image: WikipediaStructureImage }
+  | {
+      source: "wikipedia";
+      images: WikipediaStructureImage[];
+      index: number;
+    }
   | { source: "rdkit"; svg: string };
 
 export class ChemicalPreview {
@@ -57,16 +61,16 @@ export class ChemicalPreview {
       return;
     }
 
-    let image: WikipediaStructureImage | null = null;
+    let images: WikipediaStructureImage[] = [];
     try {
-      image = await this.wikipedia.resolve(name);
+      images = await this.wikipedia.resolve(name);
     } catch (error) {
       console.warn("ChemHover could not look up a Wikipedia structure image; using RDKit.", error);
     }
     if (!tooltip.isConnected) return;
 
-    if (image) {
-      this.showRecord(tooltip, record, { source: "wikipedia", image });
+    if (images.length) {
+      this.showRecord(tooltip, record, { source: "wikipedia", images, index: 0 });
       return;
     }
     await this.showRdkitFallback(tooltip, record);
@@ -81,29 +85,32 @@ export class ChemicalPreview {
     tooltip.createEl("div", { cls: "chemhover-title", text: record.name });
     const structure = tooltip.createDiv({ cls: "chemhover-structure" });
     if (artwork.source === "wikipedia") {
+      const currentImage = artwork.images[artwork.index];
       const image = structure.createEl("img", {
         attr: {
-          src: artwork.image.imageUrl,
-          alt: `${record.name} chemical structure`,
+          src: currentImage.imageUrl,
+          alt: `${record.name} structure (${currentImage.fileTitle})`,
         },
       });
       image.addEventListener(
         "error",
         () => {
+          if (!tooltip.isConnected) return;
           console.warn("ChemHover could not load the Wikipedia image; using RDKit.");
-          void this.showRdkitFallback(tooltip, record);
+          const remaining = artwork.images.filter((_, index) => index !== artwork.index);
+          if (remaining.length) {
+            this.showRecord(tooltip, record, {
+              source: "wikipedia",
+              images: remaining,
+              index: Math.min(artwork.index, remaining.length - 1),
+            });
+          } else {
+            void this.showRdkitFallback(tooltip, record);
+          }
         },
         { once: true },
       );
-      structure.createEl("a", {
-        cls: "chemhover-image-source",
-        text: "Image source & license",
-        attr: {
-          href: artwork.image.pageUrl,
-          target: "_blank",
-          rel: "noopener noreferrer",
-        },
-      });
+      this.addWikipediaControls(tooltip, record, structure, artwork, currentImage);
     } else {
       structure.innerHTML = artwork.svg;
     }
@@ -118,6 +125,64 @@ export class ChemicalPreview {
       this.addDetail(details, "Synonyms", record.synonyms.slice(0, 5).join(", "));
     }
     this.addDetail(details, "PubChem CID", String(record.cid));
+  }
+
+  private addWikipediaControls(
+    tooltip: HTMLElement,
+    record: ChemicalRecord,
+    structure: HTMLElement,
+    artwork: Extract<ChemicalArtwork, { source: "wikipedia" }>,
+    currentImage: WikipediaStructureImage,
+  ): void {
+    const controls = structure.createDiv({ cls: "chemhover-image-controls" });
+    const source = controls.createEl("a", {
+      cls: "chemhover-image-source",
+      text: currentImage.license
+        ? `Image source · ${currentImage.license}`
+        : "Image source & license",
+      attr: {
+        href: currentImage.pageUrl,
+        target: "_blank",
+        rel: "noopener noreferrer",
+        title: currentImage.fileTitle,
+      },
+    });
+    source.setAttribute("aria-label", `Image source and license for ${currentImage.fileTitle}`);
+
+    const navigation = controls.createDiv({ cls: "chemhover-image-navigation" });
+    const previous = navigation.createEl("button", {
+      text: "‹",
+      attr: { type: "button", "aria-label": "Previous structure image" },
+    });
+    previous.disabled = artwork.images.length < 2;
+    previous.addEventListener("click", () => {
+      const index = (artwork.index - 1 + artwork.images.length) % artwork.images.length;
+      this.showRecord(tooltip, record, { ...artwork, index });
+    });
+
+    navigation.createSpan({
+      cls: "chemhover-image-count",
+      text: `${artwork.index + 1} / ${artwork.images.length}`,
+    });
+
+    const next = navigation.createEl("button", {
+      text: "›",
+      attr: { type: "button", "aria-label": "Next structure image" },
+    });
+    next.disabled = artwork.images.length < 2;
+    next.addEventListener("click", () => {
+      const index = (artwork.index + 1) % artwork.images.length;
+      this.showRecord(tooltip, record, { ...artwork, index });
+    });
+
+    const fallback = navigation.createEl("button", {
+      cls: "chemhover-use-rdkit",
+      text: "Use RDKit",
+      attr: { type: "button", "aria-label": "Use the RDKit structure instead" },
+    });
+    fallback.addEventListener("click", () => {
+      void this.showRdkitFallback(tooltip, record);
+    });
   }
 
   private async showRdkitFallback(
