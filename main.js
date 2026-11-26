@@ -2644,49 +2644,61 @@ var ChemicalPreview = class {
 };
 
 // src/pubchem/resolver.ts
-var import_obsidian3 = require("obsidian"), API_ROOT2 = "https://pubchem.ncbi.nlm.nih.gov/rest/pug", REQUEST_TIMEOUT_MS2 = 15e3;
+var import_obsidian3 = require("obsidian"), API_ROOT2 = "https://pubchem.ncbi.nlm.nih.gov/rest/pug", WIKIDATA_API = "https://www.wikidata.org/w/api.php", REQUEST_TIMEOUT_MS2 = 15e3, HttpRequestError = class extends Error {
+  constructor(message, status) {
+    super(message);
+    this.status = status;
+    this.name = "HttpRequestError";
+  }
+};
 function chooseCandidate(app, searchName, candidates) {
   return new Promise((resolve) => {
-    let completed = !1, modal = new class extends import_obsidian3.SuggestModal {
-      getSuggestions(query) {
-        let normalized = query.toLocaleLowerCase();
-        return candidates.filter(
-          (candidate) => `${candidate.name} ${candidate.formula} ${candidate.cid}`.toLocaleLowerCase().includes(normalized)
-        );
-      }
-      renderSuggestion(candidate, element) {
-        element.createEl("div", { text: candidate.name }), element.createEl("small", {
-          text: `${candidate.formula || "Formula unavailable"} \xB7 CID ${candidate.cid}`
-        });
-      }
-      onChooseSuggestion(candidate) {
-        completed = !0, resolve(candidate);
+    let completed = !1;
+    new class extends import_obsidian3.Modal {
+      onOpen() {
+        this.setTitle(`Choose the PubChem match for \u201C${searchName}\u201D`);
+        let options = this.contentEl.createDiv({ cls: "chemhover-candidate-options" });
+        candidates.map((candidate) => {
+          let button = options.createEl("button", {
+            cls: "chemhover-candidate-option",
+            attr: { type: "button" }
+          });
+          return button.createEl("div", { text: candidate.name }), button.createEl("small", {
+            text: `${candidate.formula || "Formula unavailable"} \xB7 CID ${candidate.cid}`
+          }), button.addEventListener("click", () => {
+            completed = !0, resolve(candidate), this.close();
+          }), button;
+        })[0]?.focus();
       }
       onClose() {
         completed || resolve(null);
       }
-    }(app);
-    modal.setPlaceholder(`Choose the PubChem match for \u201C${searchName}\u201D`), modal.open();
+    }(app).open();
   });
 }
-async function requestJson(url) {
+async function requestJson(url, service = "PubChem") {
   let timeoutId, timeout = new Promise((_, reject) => {
     timeoutId = window.setTimeout(
-      () => reject(new Error(`PubChem request timed out after ${REQUEST_TIMEOUT_MS2} ms.`)),
+      () => reject(new Error(`${service} request timed out after ${REQUEST_TIMEOUT_MS2} ms.`)),
       REQUEST_TIMEOUT_MS2
     );
   }), response = await Promise.race([
     (0, import_obsidian3.requestUrl)({
       url,
       throw: !1,
-      headers: { Accept: "application/json" }
+      headers: {
+        Accept: "application/json",
+        ...service === "Wikidata" ? {
+          "User-Agent": "ChemHover/0.1.4 (Obsidian plugin; +https://github.com/tiaguinho-code/ChemHover)"
+        } : {}
+      }
     }),
     timeout
   ]).finally(() => {
     timeoutId !== void 0 && window.clearTimeout(timeoutId);
   });
   if (response.status < 200 || response.status >= 300)
-    throw new Error(`PubChem request failed (${response.status}).`);
+    throw new HttpRequestError(`${service} request failed (${response.status}).`, response.status);
   return response.json;
 }
 function propertiesUrl(cids, fields) {
@@ -2722,10 +2734,8 @@ var ChemicalResolver = class {
     return refreshed;
   }
   async resolveUncached(name) {
-    let cidsResponse = await requestJson(
-      `${API_ROOT2}/compound/name/${encodeURIComponent(name)}/cids/JSON`
-    ), cids = [...new Set(cidsResponse.IdentifierList?.CID ?? [])].filter((cid) => Number.isInteger(cid) && cid > 0);
-    if (cids.length === 0)
+    let cids = await this.lookupPubChemCids(name);
+    if (cids.length === 0 && (cids = await this.lookupWikidataCids(name)), cids.length === 0 && (cids = await this.lookupPubChemAutocompleteCids(name)), cids.length === 0)
       return await this.cache.rememberMissing(name), null;
     let selectedCid = cids[0];
     if (cids.length > 1) {
@@ -2738,6 +2748,73 @@ var ChemicalResolver = class {
     }
     let record = await this.fetchRecord(selectedCid, name);
     return await this.cache.remember(name, record), record;
+  }
+  async lookupPubChemCids(name) {
+    try {
+      let response = await requestJson(
+        `${API_ROOT2}/compound/name/${encodeURIComponent(name)}/cids/JSON`
+      );
+      return [...new Set(response.IdentifierList?.CID ?? [])].filter((cid) => Number.isInteger(cid) && cid > 0);
+    } catch (error) {
+      if (error instanceof HttpRequestError && error.status === 404) return [];
+      throw error;
+    }
+  }
+  async lookupPubChemAutocompleteCids(name) {
+    let url = new URL(
+      `${API_ROOT2}/autocomplete/compound/${encodeURIComponent(name)}/json`
+    );
+    url.searchParams.set("limit", "5");
+    let response;
+    try {
+      response = await requestJson(url.toString());
+    } catch (error) {
+      if (error instanceof HttpRequestError && error.status === 404) return [];
+      throw error;
+    }
+    let suggestions = [...new Set(response.dictionary_terms?.compound ?? [])], matches = await Promise.all(
+      suggestions.map((suggestion) => this.lookupPubChemCids(suggestion))
+    );
+    return [...new Set(matches.flat())];
+  }
+  async lookupWikidataCids(name) {
+    let languages = ["pt-br", "de"], searchResponses = await Promise.all(
+      languages.map((language) => {
+        let url2 = new URL(WIKIDATA_API);
+        return url2.search = new URLSearchParams({
+          action: "wbsearchentities",
+          search: name,
+          language,
+          uselang: language,
+          type: "item",
+          limit: "10",
+          format: "json"
+        }).toString(), requestJson(url2.toString(), "Wikidata");
+      })
+    );
+    for (let response of searchResponses)
+      if (response.error)
+        throw new Error(`Wikidata search failed: ${response.error.info ?? "unknown error"}.`);
+    let entityIds = [
+      ...new Set(searchResponses.flatMap(
+        (response) => (response.search ?? []).map((result) => result.id).filter((id) => typeof id == "string" && /^Q\d+$/.test(id))
+      ))
+    ];
+    if (!entityIds.length) return [];
+    let url = new URL(WIKIDATA_API);
+    url.search = new URLSearchParams({
+      action: "wbgetentities",
+      ids: entityIds.join("|"),
+      props: "claims",
+      format: "json"
+    }).toString();
+    let entitiesResponse = await requestJson(
+      url.toString(),
+      "Wikidata"
+    ), cids = entityIds.flatMap(
+      (id) => (entitiesResponse.entities?.[id]?.claims?.P662 ?? []).map((claim) => claim.mainsnak?.datavalue?.value).map((value) => typeof value == "string" ? Number(value) : Number.NaN).filter((cid) => Number.isInteger(cid) && cid > 0)
+    );
+    return [...new Set(cids)];
   }
   async getCandidates(cids) {
     let candidates = [];
