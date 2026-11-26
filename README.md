@@ -45,17 +45,21 @@ Wrap names containing spaces in braces:
 
 ```text
 \ch{Acetylsalicylic acid}
+\ch{ácido acetilsalicílico}
+\ch{Acetylsalicylsäure}
 ```
 
 The Markdown source stays unchanged. ChemHover recognizes marked names in
 Reading view and Live Preview, but ignores code spans, code blocks, and math.
 
 When you hover over a marked name, ChemHover looks it up and displays a
-structure preview. Click a marked name to keep its preview open after moving
-the pointer away; click elsewhere to dismiss it. This also makes previews
-easier to use on touchscreens. If PubChem returns multiple matches, choose the
-intended compound from the selection list; that choice is saved for later
-lookups.
+structure preview. English, Brazilian Portuguese, and German chemical names
+are supported. If PubChem does not recognize a name directly, ChemHover checks
+Wikidata for a matching compound, then checks PubChem's spelling suggestions.
+Click a marked name to keep its preview open after moving the pointer away;
+click elsewhere to dismiss it. This also makes previews easier to use on
+touchscreens. If multiple compounds match, choose the intended compound from
+the selection list; that choice is saved for later lookups.
 
 The preview can include:
 
@@ -73,11 +77,12 @@ structure locally with RDKit.
 
 ## Cache and connectivity
 
-ChemHover uses PubChem to resolve chemical names and Wikipedia to look up
-structure images, so the first lookup and image search require an internet
-connection. Resolved compound data is stored with the plugin's Obsidian data.
-Cached compounds can still be rendered offline with RDKit; Wikipedia images
-may not be available without a connection.
+ChemHover uses PubChem to resolve chemical names and spelling suggestions,
+Wikidata as a fallback for Brazilian Portuguese and German names, and
+Wikipedia to look up structure images, so the first lookup and image search
+require an internet connection. Resolved compound data is stored with the
+plugin's Obsidian data. Cached compounds can still be rendered offline with
+RDKit; Wikipedia images may not be available without a connection.
 
 Use these commands from Obsidian's command palette:
 
