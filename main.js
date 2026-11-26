@@ -2803,8 +2803,10 @@ var RDKitRenderer = class {
     let binary = atob(RDKit_minimal_default), compressed = new Uint8Array(binary.length);
     for (let index = 0; index < binary.length; index += 1)
       compressed[index] = binary.charCodeAt(index);
-    let wasmStream = new Blob([compressed]).stream().pipeThrough(new DecompressionStream("gzip")), wasmBinary = await new Response(wasmStream).arrayBuffer();
-    return await (0, import_rdkit.default)({ wasmBinary });
+    let wasmStream = new Blob([compressed]).stream().pipeThrough(new DecompressionStream("gzip")), wasmBinary = await new Response(wasmStream).arrayBuffer(), wasmModule = await WebAssembly.compile(wasmBinary);
+    return await (0, import_rdkit.default)({
+      instantiateWasm: (imports, receiveInstance) => (receiveInstance(new WebAssembly.Instance(wasmModule, imports)), {})
+    });
   }
 };
 

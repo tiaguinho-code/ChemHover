@@ -1,6 +1,9 @@
 declare module "@rdkit/rdkit" {
   interface RDKitInitOptions {
-    wasmBinary?: ArrayBuffer | Uint8Array;
+    instantiateWasm?: (
+      imports: WebAssembly.Imports,
+      receiveInstance: (instance: WebAssembly.Instance) => void,
+    ) => Record<string, unknown>;
     locateFile?: (path: string, prefix: string) => string;
   }
 

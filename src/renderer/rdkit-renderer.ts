@@ -42,6 +42,12 @@ export class RDKitRenderer {
       .stream()
       .pipeThrough(new DecompressionStream("gzip"));
     const wasmBinary = await new Response(wasmStream).arrayBuffer();
-    return (await initRDKitModule({ wasmBinary })) as RDKitModule;
+    const wasmModule = await WebAssembly.compile(wasmBinary);
+    return (await initRDKitModule({
+      instantiateWasm: (imports, receiveInstance) => {
+        receiveInstance(new WebAssembly.Instance(wasmModule, imports));
+        return {};
+      },
+    })) as RDKitModule;
   }
 }
