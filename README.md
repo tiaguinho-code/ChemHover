@@ -19,7 +19,7 @@ beginning and end and sped up 2×.
 ## Install
 
 Download `main.js`, `manifest.json`, and `styles.css` from the
-[ChemHover 0.1.3 release](https://github.com/tiaguinho-code/ChemHover/releases/tag/0.1.3)
+[ChemHover 0.1.4 release](https://github.com/tiaguinho-code/ChemHover/releases/tag/0.1.4)
 and place them in your vault's plugin folder:
 
 ```text
@@ -51,8 +51,11 @@ The Markdown source stays unchanged. ChemHover recognizes marked names in
 Reading view and Live Preview, but ignores code spans, code blocks, and math.
 
 When you hover over a marked name, ChemHover looks it up and displays a
-structure preview. If PubChem returns multiple matches, choose the intended
-compound from the selection list; that choice is saved for later lookups.
+structure preview. Click a marked name to keep its preview open after moving
+the pointer away; click elsewhere to dismiss it. This also makes previews
+easier to use on touchscreens. If PubChem returns multiple matches, choose the
+intended compound from the selection list; that choice is saved for later
+lookups.
 
 The preview can include:
 

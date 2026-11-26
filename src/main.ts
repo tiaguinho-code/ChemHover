@@ -37,7 +37,11 @@ class ChemicalNameWidget extends WidgetType {
   }
 
   ignoreEvent(event: Event): boolean {
-    return event.type !== "pointerover" && event.type !== "pointerout";
+    return (
+      event.type !== "pointerover" &&
+      event.type !== "pointerout" &&
+      event.type !== "click"
+    );
   }
 }
 
@@ -64,6 +68,7 @@ export default class ChemHoverPlugin extends Plugin {
       EditorView.domEventHandlers({
         pointerover: (event) => this.handlePointerOver(event),
         pointerout: (event) => this.handlePointerOut(event),
+        click: (event) => this.handleClick(event),
       }),
     ]);
 
@@ -116,6 +121,7 @@ export default class ChemHoverPlugin extends Plugin {
         });
         token.addEventListener("pointerenter", () => this.preview.show(token, expression.name));
         token.addEventListener("pointerleave", () => this.preview.scheduleHide());
+        token.addEventListener("click", () => this.preview.pin(token, expression.name));
         fragment.append(token);
         cursor = expression.end;
       }
@@ -185,6 +191,15 @@ export default class ChemHoverPlugin extends Plugin {
     const token = target.closest<HTMLElement>(TOKEN_SELECTOR);
     const name = token?.dataset.chemhover;
     if (token && name) this.preview.show(token, name);
+    return false;
+  }
+
+  private handleClick(event: Event): boolean {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return false;
+    const token = target.closest<HTMLElement>(TOKEN_SELECTOR);
+    const name = token?.dataset.chemhover;
+    if (token && name) this.preview.pin(token, name);
     return false;
   }
 

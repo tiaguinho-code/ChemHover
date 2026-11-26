@@ -22,6 +22,7 @@ export class ChemicalPreview {
   private tooltip?: HTMLElement;
   private hideTimer?: number;
   private hoverTarget?: HTMLElement;
+  private pinned = false;
   private imageNavigation?: {
     tooltip: HTMLElement;
     record: ChemicalRecord;
@@ -63,6 +64,19 @@ export class ChemicalPreview {
     event.stopPropagation();
   };
 
+  private readonly handleDocumentClick = (event: MouseEvent): void => {
+    const target = event.target;
+    if (
+      !(target instanceof Node) ||
+      this.tooltip?.contains(target) ||
+      this.hoverTarget?.contains(target)
+    ) {
+      return;
+    }
+
+    this.removeTooltip();
+  };
+
   constructor(
     private readonly resolver: ChemicalResolver,
     private readonly renderer: RDKitRenderer,
@@ -75,6 +89,7 @@ export class ChemicalPreview {
   }
 
   show(target: HTMLElement, name: string): void {
+    if (this.pinned) return;
     window.clearTimeout(this.hideTimer);
     this.removeTooltip();
     const tooltip = document.body.createDiv({
@@ -91,7 +106,20 @@ export class ChemicalPreview {
     void this.loadPreview(tooltip, name);
   }
 
+  pin(target: HTMLElement, name: string): void {
+    if (this.tooltip && this.hoverTarget === target) {
+      window.clearTimeout(this.hideTimer);
+    } else {
+      if (this.pinned) this.removeTooltip();
+      this.show(target, name);
+    }
+
+    this.pinned = true;
+    document.addEventListener("click", this.handleDocumentClick, true);
+  }
+
   scheduleHide(): void {
+    if (this.pinned) return;
     window.clearTimeout(this.hideTimer);
     this.hideTimer = window.setTimeout(() => this.removeTooltip(), 160);
   }
@@ -405,10 +433,13 @@ export class ChemicalPreview {
   }
 
   private removeTooltip(): void {
+    window.clearTimeout(this.hideTimer);
     this.tooltip?.remove();
     this.tooltip = undefined;
     this.hoverTarget = undefined;
+    this.pinned = false;
     this.imageNavigation = undefined;
     document.removeEventListener("keydown", this.handleKeydown, true);
+    document.removeEventListener("click", this.handleDocumentClick, true);
   }
 }

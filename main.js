@@ -2389,6 +2389,7 @@ var ChemicalPreview = class {
     this.resolver = resolver;
     this.renderer = renderer;
     this.wikipedia = wikipedia;
+    this.pinned = !1;
     this.handleKeydown = (event) => {
       let navigation = this.imageNavigation;
       if (!navigation || navigation.images.length < 2 || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey || !navigation.tooltip.matches(":hover") && !this.hoverTarget?.matches(":hover"))
@@ -2404,11 +2405,16 @@ var ChemicalPreview = class {
         event.preventDefault(), event.stopPropagation();
       }
     };
+    this.handleDocumentClick = (event) => {
+      let target = event.target;
+      !(target instanceof Node) || this.tooltip?.contains(target) || this.hoverTarget?.contains(target) || this.removeTooltip();
+    };
   }
   destroy() {
     window.clearTimeout(this.hideTimer), this.removeTooltip();
   }
   show(target, name) {
+    if (this.pinned) return;
     window.clearTimeout(this.hideTimer), this.removeTooltip();
     let tooltip = document.body.createDiv({
       cls: "chemhover-tooltip",
@@ -2416,8 +2422,11 @@ var ChemicalPreview = class {
     });
     tooltip.addEventListener("pointerenter", () => window.clearTimeout(this.hideTimer)), tooltip.addEventListener("pointerleave", () => this.scheduleHide()), tooltip.textContent = "Looking up chemical\u2026", this.tooltip = tooltip, this.hoverTarget = target, document.addEventListener("keydown", this.handleKeydown, !0), this.position(tooltip, target), this.loadPreview(tooltip, name);
   }
+  pin(target, name) {
+    this.tooltip && this.hoverTarget === target ? window.clearTimeout(this.hideTimer) : (this.pinned && this.removeTooltip(), this.show(target, name)), this.pinned = !0, document.addEventListener("click", this.handleDocumentClick, !0);
+  }
   scheduleHide() {
-    window.clearTimeout(this.hideTimer), this.hideTimer = window.setTimeout(() => this.removeTooltip(), 160);
+    this.pinned || (window.clearTimeout(this.hideTimer), this.hideTimer = window.setTimeout(() => this.removeTooltip(), 160));
   }
   async loadPreview(tooltip, name) {
     let record;
@@ -2630,7 +2639,7 @@ var ChemicalPreview = class {
     tooltip.style.left = `${left}px`, tooltip.style.top = `${Math.min(bounds.bottom + 8, window.innerHeight - 24)}px`;
   }
   removeTooltip() {
-    this.tooltip?.remove(), this.tooltip = void 0, this.hoverTarget = void 0, this.imageNavigation = void 0, document.removeEventListener("keydown", this.handleKeydown, !0);
+    window.clearTimeout(this.hideTimer), this.tooltip?.remove(), this.tooltip = void 0, this.hoverTarget = void 0, this.pinned = !1, this.imageNavigation = void 0, document.removeEventListener("keydown", this.handleKeydown, !0), document.removeEventListener("click", this.handleDocumentClick, !0);
   }
 };
 
@@ -2827,7 +2836,7 @@ var TOKEN_SELECTOR = "[data-chemhover]", ChemicalNameWidget = class _ChemicalNam
     });
   }
   ignoreEvent(event) {
-    return event.type !== "pointerover" && event.type !== "pointerout";
+    return event.type !== "pointerover" && event.type !== "pointerout" && event.type !== "click";
   }
 }, ChemHoverPlugin = class extends import_obsidian4.Plugin {
   constructor() {
@@ -2843,7 +2852,8 @@ var TOKEN_SELECTOR = "[data-chemhover]", ChemicalNameWidget = class _ChemicalNam
       this.createChemicalDecorations(),
       import_view.EditorView.domEventHandlers({
         pointerover: (event) => this.handlePointerOver(event),
-        pointerout: (event) => this.handlePointerOut(event)
+        pointerout: (event) => this.handlePointerOut(event),
+        click: (event) => this.handleClick(event)
       })
     ]), this.addCommand({
       id: "refresh-chemical-cache",
@@ -2880,7 +2890,7 @@ var TOKEN_SELECTOR = "[data-chemhover]", ChemicalNameWidget = class _ChemicalNam
           text: expression.name,
           attr: { "data-chemhover": expression.name }
         });
-        token.addEventListener("pointerenter", () => this.preview.show(token, expression.name)), token.addEventListener("pointerleave", () => this.preview.scheduleHide()), fragment.append(token), cursor = expression.end;
+        token.addEventListener("pointerenter", () => this.preview.show(token, expression.name)), token.addEventListener("pointerleave", () => this.preview.scheduleHide()), token.addEventListener("click", () => this.preview.pin(token, expression.name)), fragment.append(token), cursor = expression.end;
       }
       fragment.append(source.slice(cursor)), textNode.replaceWith(fragment);
     }
@@ -2934,6 +2944,12 @@ var TOKEN_SELECTOR = "[data-chemhover]", ChemicalNameWidget = class _ChemicalNam
     if (!(target instanceof HTMLElement)) return !1;
     let token = target.closest(TOKEN_SELECTOR), name = token?.dataset.chemhover;
     return token && name && this.preview.show(token, name), !1;
+  }
+  handleClick(event) {
+    let target = event.target;
+    if (!(target instanceof HTMLElement)) return !1;
+    let token = target.closest(TOKEN_SELECTOR), name = token?.dataset.chemhover;
+    return token && name && this.preview.pin(token, name), !1;
   }
   handlePointerOut(event) {
     let target = event.target;
