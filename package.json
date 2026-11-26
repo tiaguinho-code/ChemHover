@@ -1,6 +1,6 @@
 {
   "name": "chemhover",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Chemical name hover previews for Obsidian",
   "main": "main.js",
   "scripts": {
