@@ -45,7 +45,8 @@
   object-fit: contain;
 }
 
-body.theme-dark .chemhover-structure img {
+body.theme-dark .chemhover-structure img,
+body.theme-dark .chemhover-structure svg {
   /* Lighten dark diagram strokes while preserving their element-color hues. */
   filter: invert(1) hue-rotate(180deg);
   opacity: 0.88;
