@@ -2999,7 +2999,9 @@ var TOKEN_SELECTOR = "[data-chemhover]", ChemicalNameWidget = class _ChemicalNam
                 });
                 for (let expression of findChemicalExpressions(line.text)) {
                   let from = line.from + expression.start, to = line.from + expression.end;
-                  ignored.some((range) => from < range.to && to > range.from) || ranges.push({ from, to, name: expression.name });
+                  ignored.some((range) => from < range.to && to > range.from) || this.view.state.selection.ranges.some(
+                    (selection) => selection.from <= to && selection.to >= from
+                  ) || ranges.push({ from, to, name: expression.name });
                 }
               }
               if (line.number === lastLine) break;

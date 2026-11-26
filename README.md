@@ -51,6 +51,9 @@ Wrap names containing spaces in braces:
 
 The Markdown source stays unchanged. ChemHover recognizes marked names in
 Reading view and Live Preview, but ignores code spans, code blocks, and math.
+In Live Preview, the original `\ch` syntax appears while the cursor is inside
+or immediately after an expression; moving away restores the chemical-name
+preview.
 
 When you hover over a marked name, ChemHover looks it up and displays a
 structure preview. English, Brazilian Portuguese, and German chemical names

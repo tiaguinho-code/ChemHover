@@ -166,6 +166,13 @@ export default class ChemHoverPlugin extends Plugin {
                   const from = line.from + expression.start;
                   const to = line.from + expression.end;
                   if (ignored.some((range) => from < range.to && to > range.from)) continue;
+                  if (
+                    this.view.state.selection.ranges.some(
+                      (selection) => selection.from <= to && selection.to >= from,
+                    )
+                  ) {
+                    continue;
+                  }
                   ranges.push({ from, to, name: expression.name });
                 }
               }
