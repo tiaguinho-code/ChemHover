@@ -124,7 +124,7 @@ async function requestJson<T>(url: string, service = "PubChem"): Promise<T> {
         ...(service === "Wikidata"
           ? {
               "User-Agent":
-                "ChemHover/0.1.5 (Obsidian plugin; +https://github.com/tiaguinho-code/ChemHover)",
+                "ChemHover/0.1.6 (Obsidian plugin; +https://github.com/tiaguinho-code/ChemHover)",
             }
           : {}),
       },
