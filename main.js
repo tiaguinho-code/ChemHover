@@ -2689,7 +2689,7 @@ async function requestJson(url, service = "PubChem") {
       headers: {
         Accept: "application/json",
         ...service === "Wikidata" ? {
-          "User-Agent": "ChemHover/0.1.4 (Obsidian plugin; +https://github.com/tiaguinho-code/ChemHover)"
+          "User-Agent": "ChemHover/0.1.5 (Obsidian plugin; +https://github.com/tiaguinho-code/ChemHover)"
         } : {}
       }
     }),

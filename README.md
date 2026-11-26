@@ -19,7 +19,7 @@ beginning and end and sped up 2×.
 ## Install
 
 Download `main.js`, `manifest.json`, and `styles.css` from the
-[ChemHover 0.1.4 release](https://github.com/tiaguinho-code/ChemHover/releases/tag/0.1.4)
+[ChemHover 0.1.5 release](https://github.com/tiaguinho-code/ChemHover/releases/tag/0.1.5)
 and place them in your vault's plugin folder:
 
 ```text
